@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
         preferHighRefreshRate()
         setContent {
             MarketRocketTheme {
-                MarketRocketApp(viewModel<GameViewModel>())
+                MarketRocketApp(viewModel { GameViewModel(application) })
             }
         }
     }
