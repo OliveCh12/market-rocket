@@ -8,31 +8,75 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.marketrocket.data.GameSettings
+import com.marketrocket.data.SavedGame
 import com.marketrocket.data.StorageManager
 import com.marketrocket.game.GameEngine
 import com.marketrocket.game.GameEvent
 import com.marketrocket.game.GameState
 import com.marketrocket.game.Phase
+import com.marketrocket.game.PlayerProfile
 import com.marketrocket.game.Upgrade
+import java.io.IOException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+
+internal enum class LoadState { Loading, Ready, Failed }
 
 internal class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val storage = StorageManager(application)
-    private val engine = GameEngine(storage.load())
+    private var engine = GameEngine(PlayerProfile())
     private val currentState = mutableStateOf(engine.snapshot())
     val state: State<GameState> = currentState
     private val displayedPot = mutableLongStateOf(currentState.value.roundAmount)
     val displayedRoundAmount: LongState = displayedPot
     private var hudElapsed = 0.0
-    var settings by mutableStateOf(storage.loadSettings())
+    var settings by mutableStateOf(GameSettings())
         private set
+    var loadState by mutableStateOf(LoadState.Loading)
+        private set
+    var saveFailed by mutableStateOf(false)
+        private set
+    private var loading: Job? = null
+    private var saveObserver: Job? = null
     var paused by mutableStateOf(false)
         private set
     val needsFrames: Boolean get() = !paused && engine.needsFrames
 
+    init {
+        loadGame()
+    }
+
+    fun loadGame() {
+        if (loading?.isActive == true || loadState == LoadState.Ready) return
+        loadState = LoadState.Loading
+        loading = viewModelScope.launch {
+            try {
+                val saved = storage.load()
+                engine = GameEngine(saved.profile)
+                settings = saved.settings
+                publish()
+                loadState = LoadState.Ready
+            } catch (_: IOException) {
+                loadState = LoadState.Failed
+            }
+        }
+    }
+
     fun updateSettings(value: GameSettings) {
+        if (settings == value) return
         settings = value
-        storage.saveSettings(value)
+        saveGame()
+    }
+
+    fun retrySave() {
+        saveFailed = false
+        saveGame()
+    }
+
+    fun dismissSaveError() {
+        saveFailed = false
     }
 
     fun togglePause() {
@@ -95,12 +139,26 @@ internal class GameViewModel(application: Application) : AndroidViewModel(applic
 
     private fun publish(save: Boolean = false, refreshPot: Boolean = true) {
         val snapshot = engine.snapshot(interpolate = true)
-        if (save) storage.save(snapshot.profile)
         if (refreshPot || snapshot.phase != currentState.value.phase) {
             displayedPot.longValue = snapshot.roundAmount
             hudElapsed = 0.0
         }
         currentState.value = snapshot
+        if (save) saveGame()
+    }
+
+    private fun saveGame() {
+        val write = storage.save(SavedGame(currentState.value.profile, settings))
+        saveObserver?.cancel()
+        saveObserver = viewModelScope.launch {
+            try {
+                write.await()
+                saveFailed = false
+            } catch (_: IOException) {
+                pauseForInterruption()
+                saveFailed = true
+            }
+        }
     }
 }
 

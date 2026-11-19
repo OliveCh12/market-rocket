@@ -28,6 +28,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
@@ -58,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.marketrocket.GameViewModel
+import com.marketrocket.LoadState
 import com.marketrocket.data.GameSettings
 
 private enum class Destination { Menu, Game, Settings, Statistics }
@@ -65,6 +67,11 @@ private enum class Destination { Menu, Game, Settings, Statistics }
 @Composable
 internal fun MarketRocketApp(viewModel: GameViewModel) {
     var destination by rememberSaveable { mutableStateOf(Destination.Menu) }
+    val loadState = viewModel.loadState
+    if (loadState != LoadState.Ready) {
+        ProfileLoading(loadState, viewModel::loadGame)
+        return
+    }
     val settings = viewModel.settings
     when (destination) {
         Destination.Menu -> HomeScreen(
@@ -84,6 +91,36 @@ internal fun MarketRocketApp(viewModel: GameViewModel) {
         )
         Destination.Statistics -> StatisticsScreen(viewModel.state.value.profile) {
             destination = Destination.Settings
+        }
+    }
+    if (viewModel.saveFailed) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissSaveError,
+            title = { Text("Sauvegarde indisponible") },
+            text = { Text("La progression est encore en mémoire. Réessayez pour l’enregistrer.") },
+            confirmButton = { TextButton(onClick = viewModel::retrySave) { Text("Réessayer") } },
+            dismissButton = { TextButton(onClick = viewModel::dismissSaveError) { Text("Plus tard") } },
+        )
+    }
+}
+
+@Composable
+private fun ProfileLoading(state: LoadState, onRetry: () -> Unit) {
+    Box(
+        Modifier.fillMaxSize().background(Obsidian).safeDrawingPadding(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (state == LoadState.Failed) {
+                Text("Le profil n’a pas pu être chargé.", color = WhiteInk)
+                Button(onClick = onRetry) { Text("Réessayer") }
+            } else {
+                Text("Chargement du profil…", color = MutedInk)
+            }
         }
     }
 }
