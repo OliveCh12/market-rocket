@@ -1,6 +1,5 @@
 package com.marketrocket.game
 
-import kotlin.math.exp
 import kotlin.math.max
 
 internal const val MAX_BANK = 9_000_000_000_000_000L
@@ -34,9 +33,8 @@ internal data class PlayerProfile(
     val lifetimeEarnings: Long = bank,
     val stats: CareerStats = CareerStats(),
 ) {
-    val startingCapital: Long get() = 250L shl capitalLevel
-    val growthRate: Double get() = 0.29 + 0.105 * leverageLevel
-    val growthPerSecond: Double get() = exp(growthRate) - 1.0
+    val startingCapital: Long get() = 150L + 55L * capitalLevel
+    val incomePerSecond: Long get() = 12L + 4L * leverageLevel
 
     val tierProgress: TierProgress
         get() {
@@ -94,13 +92,19 @@ internal data class CareerStats(
     }
 }
 
-internal enum class Upgrade(val title: String, private val prices: List<Long>) {
+internal enum class Upgrade(
+    val title: String,
+    private val prices: List<Long>,
+    private val legacyPrices: List<Long> = prices,
+) {
     Capital(
         "Capital de départ",
+        listOf(750L, 1_150L, 1_650L, 2_300L, 3_150L, 4_200L, 5_500L, 7_000L),
         listOf(750L, 2_400L, 8_000L, 28_000L, 100_000L, 360_000L, 1_300_000L, 4_800_000L),
     ),
     Leverage(
         "Effet de levier",
+        listOf(1_250L, 1_900L, 2_700L, 3_700L, 5_000L, 6_500L, 8_400L, 10_800L),
         listOf(1_250L, 4_200L, 14_000L, 46_000L, 150_000L, 500_000L, 1_650_000L, 5_500_000L),
     ),
     Shield("Bouclier Anti-Krach", listOf(5_000L));
@@ -115,7 +119,7 @@ internal enum class Upgrade(val title: String, private val prices: List<Long>) {
 
     fun price(profile: PlayerProfile): Long? = prices.getOrNull(level(profile))
 
-    fun totalSpent(profile: PlayerProfile): Long = prices.take(level(profile)).sum()
+    fun legacyTotalSpent(profile: PlayerProfile): Long = legacyPrices.take(level(profile)).sum()
 
     fun nextLevel(profile: PlayerProfile): PlayerProfile = when (this) {
         Capital -> profile.copy(capitalLevel = profile.capitalLevel + 1)
@@ -125,7 +129,7 @@ internal enum class Upgrade(val title: String, private val prices: List<Long>) {
 }
 
 internal fun PlayerProfile.earningsBeforeTracking(): Long =
-    (bank + Upgrade.entries.sumOf { it.totalSpent(this) }).coerceAtMost(MAX_BANK)
+    (bank + Upgrade.entries.sumOf { it.legacyTotalSpent(this) }).coerceAtMost(MAX_BANK)
 
 internal enum class Phase { Ready, Playing, CashedOut, Crashed }
 
@@ -137,16 +141,9 @@ internal enum class Impact { Ceiling, Floor, Volatility }
 
 internal enum class Edge { Ceiling, Floor }
 
-internal enum class BonusKind(val addition: Long, val multiplier: Double) {
-    Cash(250L, 1.0),
-    Leverage(0L, 1.5),
-    Double(0L, 2.0);
-
-    fun collect(pot: Double, combo: Int): Double {
-        val bonus = addition + pot * (multiplier - 1.0)
-        val streakBoost = 1.0 + (combo - 1).coerceIn(0, 5) * 0.1
-        return (pot + bonus * streakBoost).coerceAtMost(MAX_BANK.toDouble())
-    }
+internal enum class BonusKind(val radius: Float) {
+    Standard(RING_RADIUS),
+    Premium(0.036f),
 }
 
 internal enum class ParticleColor { Gold, Emerald, Coral }
@@ -173,7 +170,10 @@ internal data class Obstacle(
 internal data class Bonus(
     val center: WorldPoint,
     val kind: BonusKind,
-)
+    val value: Long,
+) {
+    fun payout(combo: Int): Long = value + value * (combo - 1).coerceIn(0, 6) * 8 / 100
+}
 
 internal data class Particle(
     val origin: WorldPoint,
@@ -187,11 +187,14 @@ internal data class Particle(
 internal data class FloatingReward(
     val position: WorldPoint,
     val kind: BonusKind,
+    val amount: Long,
     val bornAt: Float,
 )
 
 internal data class RoundResult(
     val amount: Long,
+    val rings: Int,
+    val bestCombo: Int,
     val impact: Impact? = null,
     val newRecord: Boolean = false,
 )

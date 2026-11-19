@@ -25,6 +25,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.marketrocket.game.Bonus
+import com.marketrocket.game.BonusKind
 import com.marketrocket.game.Edge
 import com.marketrocket.game.FloatingReward
 import com.marketrocket.game.GameState
@@ -34,22 +35,24 @@ import com.marketrocket.game.Particle
 import com.marketrocket.game.ParticleColor
 import com.marketrocket.game.Phase
 import com.marketrocket.game.REWARD_DURATION
-import com.marketrocket.game.RING_RADIUS
 import com.marketrocket.game.SHAKE_DURATION
 import com.marketrocket.game.WorldPoint
 import kotlin.math.cos
 import kotlin.math.sin
 
-private val ringTextStyle = MarketLabel.copy(
+private val premiumGold = Color(0xFFFFB45B)
+private val ringTextStyle = MarketMoney.copy(
     fontSize = 11.sp,
+    lineHeight = 14.sp,
     fontWeight = FontWeight.Bold,
     letterSpacing = 0.sp,
     shadow = Shadow(Obsidian, Offset(0f, 2f), 6f),
 )
+private val rewardTextStyle = ringTextStyle.copy(fontSize = 19.sp, lineHeight = 23.sp)
 
 @Composable
 internal fun MarketRocketCanvas(state: State<GameState>, reduceEffects: Boolean, modifier: Modifier = Modifier) {
-    val textMeasurer = rememberTextMeasurer(cacheSize = 8)
+    val textMeasurer = rememberTextMeasurer(cacheSize = 16)
     val curve = remember { Path() }
     val area = remember { Path() }
     val triangle = remember { Path() }
@@ -73,7 +76,7 @@ internal fun MarketRocketCanvas(state: State<GameState>, reduceEffects: Boolean,
                 drawGuide(frame.player, camera)
                 drawCurve(frame, camera, curve, area, underCurve)
                 frame.obstacles.forEach { drawSpike(it, camera, triangle) }
-                val glint = if (reduceEffects) 215f else 215f + frame.player.x * 250f
+                val glint = if (reduceEffects) 215f else 215f + frame.effectsTime * 155f
                 frame.bonuses.forEach { drawRing(it, camera, glint, textMeasurer) }
                 drawHead(frame, camera)
                 if (!reduceEffects) frame.particles.forEach { drawParticle(it, frame.effectsTime, camera) }
@@ -196,27 +199,43 @@ private fun DrawScope.drawSpike(obstacle: Obstacle, camera: Float, path: Path) {
 
 private fun DrawScope.drawRing(bonus: Bonus, camera: Float, glint: Float, measurer: TextMeasurer) {
     val center = point(bonus.center, camera)
-    val radius = RING_RADIUS * size.minDimension
+    val radius = bonus.kind.radius * size.minDimension
     if (center.x + radius < 0f || center.x - radius > size.width || radius <= 0f) return
+    val premium = bonus.kind == BonusKind.Premium
+    val tint = if (premium) premiumGold else Gold
+    val halo = radius * if (premium) 2.65f else 2.1f
     drawCircle(
-        Brush.radialGradient(listOf(Gold.copy(alpha = 0.14f), Color.Transparent), center, radius * 2.1f),
-        radius = radius * 2.1f,
+        Brush.radialGradient(listOf(tint.copy(alpha = 0.20f), Color.Transparent), center, halo),
+        radius = halo,
         center = center,
     )
     drawCircle(Color(0xFF774822), radius, center + Offset(2.dp.toPx(), 2.dp.toPx()), style = Stroke(3.dp.toPx()))
-    drawCircle(Gold.copy(alpha = 0.20f), radius, center, style = Stroke(6.dp.toPx()))
-    drawCircle(Gold, radius, center, style = Stroke(2.4.dp.toPx()))
+    drawCircle(tint.copy(alpha = 0.20f), radius, center, style = Stroke(6.dp.toPx()))
+    drawCircle(tint, radius, center, style = Stroke(2.2.dp.toPx()))
+    val angle = (glint + bonus.center.x * 91f) % 360f
     drawArc(
-        Color(0xFFFFF1AF), glint % 360f, 74f, useCenter = false,
+        Color(0xFFFFF1AF), angle, 74f, useCenter = false,
         topLeft = center - Offset(radius, radius),
         size = Size(radius * 2f, radius * 2f),
-        style = Stroke(3.2.dp.toPx(), cap = StrokeCap.Round),
+        style = Stroke(3.dp.toPx(), cap = StrokeCap.Round),
     )
+    if (premium) {
+        val outer = radius + 4.dp.toPx()
+        val topLeft = center - Offset(outer, outer)
+        val arcSize = Size(outer * 2f, outer * 2f)
+        val accent = Stroke(1.6.dp.toPx(), cap = StrokeCap.Round)
+        drawArc(tint, -angle, 46f, false, topLeft, arcSize, style = accent)
+        drawArc(tint, 180f - angle, 46f, false, topLeft, arcSize, style = accent)
+    }
 
-    val label = measurer.measure(bonus.kind.label(), ringTextStyle)
+    val label = measurer.measure("+${formatMoney(bonus.value)}", ringTextStyle)
     val x = (center.x - label.size.width * 0.5f).coerceIn(0f, (size.width - label.size.width).coerceAtLeast(0f))
-    val y = (center.y - radius - label.size.height - 8.dp.toPx()).coerceAtLeast(0f)
-    drawText(label, Gold, topLeft = Offset(x, y))
+    val y = if (premium && bonus.center.y < 0.5f) {
+        center.y + radius + 7.dp.toPx()
+    } else {
+        (center.y - radius - label.size.height - 7.dp.toPx()).coerceAtLeast(0f)
+    }
+    drawText(label, tint, topLeft = Offset(x, y))
 }
 
 private fun DrawScope.drawHead(frame: GameState, camera: Float) {
@@ -269,22 +288,28 @@ private fun DrawScope.drawReward(
 ) {
     val progress = ((time - reward.bornAt) / REWARD_DURATION).coerceIn(0f, 1f)
     val center = point(reward.position, camera)
-    val layout = measurer.measure(
-        reward.kind.label(),
-        MarketMoney.copy(fontSize = 19.sp, lineHeight = 23.sp, letterSpacing = 0.sp),
-    )
+    val premium = reward.kind == BonusKind.Premium
+    val tint = if (premium) premiumGold else Gold
+    val layout = measurer.measure("+${formatMoney(reward.amount)}", rewardTextStyle)
     val x = (center.x - layout.size.width / 2f).coerceIn(0f, (size.width - layout.size.width).coerceAtLeast(0f))
     val lift = if (reduceEffects) 0f else (1f - (1f - progress) * (1f - progress)) * 38.dp.toPx()
     val y = (center.y - 24.dp.toPx() - lift).coerceAtLeast(0f)
-    val alpha = (1f - progress * progress).coerceIn(0f, 1f)
+    val alpha = ((1f - progress) / 0.45f).coerceIn(0f, 1f)
     if (!reduceEffects) {
-        val wave = (progress * 2.4f).coerceIn(0f, 1f)
-        drawCircle(
-            Gold.copy(alpha = (1f - wave) * 0.65f),
-            RING_RADIUS * size.minDimension * (1f + wave * 1.6f),
-            center,
-            style = Stroke(1.6.dp.toPx()),
-        )
+        val radius = reward.kind.radius * size.minDimension
+        drawPickupWave(center, tint, radius, progress)
+        if (premium && progress >= 0.11f) drawPickupWave(center, tint, radius, progress - 0.11f)
     }
-    drawText(layout, Gold.copy(alpha = alpha), topLeft = Offset(x, y))
+    drawText(layout, tint.copy(alpha = alpha), topLeft = Offset(x, y))
+}
+
+private fun DrawScope.drawPickupWave(center: Offset, tint: Color, radius: Float, progress: Float) {
+    val fade = 1f - progress * 2.6f
+    if (fade <= 0f) return
+    drawCircle(
+        tint.copy(alpha = fade * 0.7f),
+        radius * (1f + (1f - fade * fade) * 1.8f),
+        center,
+        style = Stroke(1.6.dp.toPx()),
+    )
 }

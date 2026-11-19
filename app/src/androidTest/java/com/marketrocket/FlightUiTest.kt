@@ -28,7 +28,7 @@ class FlightUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun holdAndReleaseCollectsAnRingBeforeCashOut() {
+    fun holdAndReleaseCollectsARingBeforeCashOut() {
         play()
         clockManually {
             val field = compose.onNodeWithTag("flight-field")
@@ -60,6 +60,7 @@ class FlightUiTest {
             compose.onNodeWithText("Encaisser").assertIsEnabled().performClick()
             compose.mainClock.advanceTimeBy(320)
             compose.onNodeWithText("ENCAISSÉ").assertIsDisplayed()
+            compose.onNodeWithText("1 anneau").assertIsDisplayed()
             compose.onNodeWithText("Relancer").assertIsEnabled().performClick()
             compose.mainClock.advanceTimeBy(34)
             compose.onNodeWithText("Un anneau requis").assertIsNotEnabled()

@@ -33,11 +33,10 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
     private var player = START
     private var previousPlayer = START
     private var velocityY = 0.0
-    private var elapsed = 0.0
+    private var flightSteps = 0L
     private var accumulator = 0.0
     private var effectsTime = 0f
-    private var pot = profile.startingCapital.toDouble()
-    private var growthFactor = exp(profile.growthRate * STEP_SECONDS)
+    private var bonusIncome = 0L
     private var result: RoundResult? = null
     private var thrust = false
     private var hasShield = profile.shieldLevel > 0
@@ -59,6 +58,14 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         get() = phase == Phase.Playing ||
             shakeRemaining > 0f || particles.isNotEmpty() || rewards.isNotEmpty()
 
+    private val pot: Long
+        get() = if (phase == Phase.Ready || phase == Phase.Playing) {
+            val passiveIncome = flightSteps * profile.incomePerSecond / STEPS_PER_SECOND
+            (profile.startingCapital + passiveIncome + bonusIncome).coerceAtMost(MAX_BANK)
+        } else {
+            0L
+        }
+
     fun snapshot(interpolate: Boolean = false) = GameState(
         phase = phase,
         profile = profile,
@@ -69,7 +76,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         bonuses = bonusSnapshot ?: bonuses.toList().also { bonusSnapshot = it },
         particles = particleSnapshot ?: particles.toList().also { particleSnapshot = it },
         rewards = rewardSnapshot ?: rewards.toList().also { rewardSnapshot = it },
-        roundAmount = pot.toLong(),
+        roundAmount = pot,
         result = result,
         hasShield = hasShield,
         shakeRemaining = shakeRemaining,
@@ -88,8 +95,6 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         if (seed != null || phase != Phase.Ready) resetCourse(seed ?: roundSeeds.nextInt())
         phase = Phase.Playing
         runNumber++
-        pot = profile.startingCapital.toDouble()
-        growthFactor = exp(profile.growthRate * STEP_SECONDS)
         result = null
         thrust = held
         hasShield = profile.shieldLevel > 0
@@ -100,7 +105,6 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         if (phase == Phase.Ready) return
         resetCourse(roundSeeds.nextInt())
         phase = Phase.Ready
-        pot = profile.startingCapital.toDouble()
         result = null
         thrust = false
         hasShield = profile.shieldLevel > 0
@@ -112,15 +116,14 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
 
     fun cashOut(): Boolean {
         if (phase != Phase.Playing || collectedRings == 0) return false
-        val payment = min(pot.toLong(), MAX_BANK - profile.bank)
+        val payment = min(pot, MAX_BANK - profile.bank)
         val newRecord = payment > profile.stats.bestCashOut
         profile = profile.copy(
             bank = profile.bank + payment,
             lifetimeEarnings = (profile.lifetimeEarnings + payment).coerceAtMost(MAX_BANK),
             stats = profile.stats.record(collectedRings, bestCombo, flightMillis(), payment),
         )
-        result = RoundResult(payment, newRecord = newRecord)
-        pot = 0.0
+        result = RoundResult(payment, collectedRings, bestCombo, newRecord = newRecord)
         thrust = false
         phase = Phase.CashedOut
         burst(player, ParticleColor.Emerald, 22)
@@ -132,10 +135,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         val price = upgrade.price(profile) ?: return false
         if (profile.bank < price) return false
         profile = upgrade.nextLevel(profile).copy(bank = profile.bank - price)
-        if (phase == Phase.Ready) {
-            pot = profile.startingCapital.toDouble()
-            hasShield = profile.shieldLevel > 0
-        }
+        if (phase == Phase.Ready) hasShield = profile.shieldLevel > 0
         return true
     }
 
@@ -175,15 +175,16 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
             (velocityY - targetY) * (1.0 - decay) / FLIGHT_RESPONSE
         velocityY = targetY + (velocityY - targetY) * decay
 
-        val speed = min(MAX_FLIGHT_SPEED, START_SPEED + (elapsed + seconds * 0.5) * ACCELERATION)
-        elapsed += seconds
+        val elapsed = (flightSteps + 0.5) * seconds
+        val accelerationTime = (elapsed - 2.0).coerceAtLeast(0.0)
+        val speed = min(MAX_FLIGHT_SPEED, START_SPEED + elapsed * ACCELERATION + accelerationTime * EXTRA_ACCELERATION)
+        flightSteps++
         val radiusY = PLAYER_RADIUS / playfield.yScale
         player = WorldPoint(
             x = (previous.x + speed * seconds).toFloat(),
             y = nextY.toFloat().coerceIn(radiusY, 1f - radiusY),
         )
         extendTrail(previous)
-        pot = (pot * growthFactor).coerceAtMost(MAX_BANK.toDouble())
 
         val boundary = when {
             nextY <= radiusY -> Impact.Ceiling
@@ -206,16 +207,17 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
 
         val bonus = bonuses.firstOrNull()
         if (bonus != null) {
-            val ringRadiusX = (RING_RADIUS + PLAYER_RADIUS) / playfield.xScale
+            val ringRadiusX = (bonus.kind.radius + PLAYER_RADIUS) / playfield.xScale
             if (touches(bonus, previous)) {
                 bonuses.removeAt(0)
                 bonusSnapshot = null
                 collectedRings++
                 combo++
                 bestCombo = maxOf(bestCombo, combo)
-                pot = bonus.kind.collect(pot, combo)
-                burst(bonus.center, ParticleColor.Gold, 18)
-                rewards += FloatingReward(bonus.center, bonus.kind, effectsTime)
+                val amount = bonus.payout(combo).coerceAtMost(MAX_BANK - pot)
+                bonusIncome += amount
+                burst(bonus.center, ParticleColor.Gold, if (bonus.kind == BonusKind.Premium) 25 else 14)
+                rewards += FloatingReward(bonus.center, bonus.kind, amount, effectsTime)
                 rewardSnapshot = null
                 feedback = GameEvent.Ring
             } else if (bonus.center.x < player.x - ringRadiusX) {
@@ -235,9 +237,10 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         player = START
         previousPlayer = START
         velocityY = 0.0
-        elapsed = 0.0
+        flightSteps = 0L
         accumulator = 0.0
         effectsTime = 0f
+        bonusIncome = 0L
         collectedRings = 0
         combo = 0
         bestCombo = 0
@@ -265,6 +268,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
             obstacleSnapshot = null
             bonusSnapshot = null
             obstacles += nextGate.obstacle
+            nextGate.opposite?.let { obstacles += it }
             bonuses += nextGate.bonus
             nextGate = course.next()
         }
@@ -316,7 +320,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         }
         val dx = startX + nearest * stepX
         val dy = startY + nearest * stepY
-        val radius = RING_RADIUS + PLAYER_RADIUS
+        val radius = bonus.kind.radius + PLAYER_RADIUS
         return dx * dx + dy * dy <= radius * radius
     }
 
@@ -339,12 +343,11 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         return dx * dx + dy * dy <= PLAYER_RADIUS * PLAYER_RADIUS
     }
 
-    private fun flightMillis(): Long = (elapsed * 1_000).toLong()
+    private fun flightMillis(): Long = flightSteps * 1_000 / STEPS_PER_SECOND
 
     private fun crash(impact: Impact): GameEvent {
-        result = RoundResult(pot.toLong(), impact)
+        result = RoundResult(pot, collectedRings, bestCombo, impact)
         profile = profile.copy(stats = profile.stats.record(collectedRings, bestCombo, flightMillis()))
-        pot = 0.0
         combo = 0
         thrust = false
         phase = Phase.Crashed
@@ -381,13 +384,15 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
 
     private companion object {
         const val MAX_FRAME_SECONDS = 0.08
-        const val STEP_SECONDS = 1.0 / 120.0
+        const val STEPS_PER_SECOND = 120
+        const val STEP_SECONDS = 1.0 / STEPS_PER_SECOND
         const val STEP_EPSILON = 1e-10
         const val ASCENT_SPEED = -0.51
         const val FALL_SPEED = 0.42
         const val FLIGHT_RESPONSE = 7.5
         const val START_SPEED = 0.31
         const val ACCELERATION = 0.009
+        const val EXTRA_ACCELERATION = 0.012
         const val TRAIL_SPACING = 0.006f
         val FLIGHT_DECAY = exp(-FLIGHT_RESPONSE * STEP_SECONDS)
         val START = WorldPoint(0f, 0.52f)

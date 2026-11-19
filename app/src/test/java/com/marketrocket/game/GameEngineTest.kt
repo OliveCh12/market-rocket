@@ -47,8 +47,9 @@ class GameEngineTest {
 
         assertNotNull(collected)
         val frame = checkNotNull(collected)
-        assertTrue(frame.roundAmount >= 600L)
-        assertEquals(BonusKind.Cash, frame.rewards.single().kind)
+        assertTrue(frame.roundAmount in 205L..230L)
+        assertEquals(BonusKind.Standard, frame.rewards.single().kind)
+        assertEquals(55L, frame.rewards.single().amount)
         assertTrue(frame.particles.any { it.color == ParticleColor.Gold })
         assertFalse(frame.bonuses.any { it.center.x < 0.5f })
         assertEquals(0L, frame.profile.bank)
@@ -78,7 +79,7 @@ class GameEngineTest {
         assertEquals(pot, engine.snapshot().result?.amount)
 
         assertTrue(engine.startRound())
-        assertEquals(250L, engine.snapshot().roundAmount)
+        assertEquals(150L, engine.snapshot().roundAmount)
         assertEquals(200 + pot, engine.snapshot().profile.bank)
         assertFalse(engine.cashOut())
     }
@@ -161,10 +162,10 @@ class GameEngineTest {
         val upgraded = engine.snapshot().profile
 
         assertEquals(3_000L, upgraded.bank)
-        assertEquals(500L, upgraded.startingCapital)
-        assertTrue(upgraded.growthPerSecond > PlayerProfile().growthPerSecond)
+        assertEquals(205L, upgraded.startingCapital)
+        assertEquals(16L, upgraded.incomePerSecond)
         assertTrue(engine.startRound())
-        assertEquals(500L, engine.snapshot().roundAmount)
+        assertEquals(205L, engine.snapshot().roundAmount)
         assertTrue(engine.snapshot().hasShield)
         assertFalse(engine.buy(Upgrade.Capital))
     }
