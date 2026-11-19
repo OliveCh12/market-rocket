@@ -13,7 +13,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 
-internal enum class Symbol { Trend, Play, Deposit, Reload, Up, Down, Sliders, Chevron, Shield, Close, Bolt }
+internal enum class Symbol {
+    Trend, Play, Deposit, Reload, Up, Down, Sliders, Chevron, Shield, Close, Bolt, Back, Pause, Lock,
+}
 
 @Composable
 internal fun MarketIcon(
@@ -80,6 +82,19 @@ internal fun MarketIcon(
                 drawCircle(color, 2.1f * unit, dot(15f, 17f), style = stroke)
             }
             Symbol.Chevron -> trace(9f, 6f, 15f, 12f, 9f, 18f)
+            Symbol.Back -> {
+                trace(20f, 12f, 4f, 12f)
+                trace(11f, 5f, 4f, 12f, 11f, 19f)
+            }
+            Symbol.Pause -> {
+                trace(9f, 5f, 9f, 19f)
+                trace(15f, 5f, 15f, 19f)
+            }
+            Symbol.Lock -> {
+                trace(6f, 10f, 18f, 10f, 18f, 20f, 6f, 20f, 6f, 10f)
+                drawArc(color, 180f, 180f, useCenter = false, dot(8f, 4f), Size(8f * unit, 9f * unit), style = stroke)
+                drawCircle(color, unit, dot(12f, 15f))
+            }
             Symbol.Shield -> {
                 trace(12f, 3f, 20f, 6f, 19f, 14f, 16f, 18f, 12f, 21f, 8f, 18f, 5f, 14f, 4f, 6f, 12f, 3f)
                 trace(8.5f, 12f, 11f, 14.5f, 15.5f, 9.5f)

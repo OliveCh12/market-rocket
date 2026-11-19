@@ -2,20 +2,98 @@ package com.marketrocket
 
 import android.app.Application
 import androidx.compose.runtime.State
+import androidx.compose.runtime.LongState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.marketrocket.data.GameSettings
+import com.marketrocket.data.SavedGame
 import com.marketrocket.data.StorageManager
 import com.marketrocket.game.GameEngine
+import com.marketrocket.game.GameEvent
 import com.marketrocket.game.GameState
 import com.marketrocket.game.Phase
+import com.marketrocket.game.PlayerProfile
 import com.marketrocket.game.Upgrade
+import java.io.IOException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
+
+internal enum class LoadState { Loading, Ready, Failed }
 
 internal class GameViewModel(application: Application) : AndroidViewModel(application) {
     private val storage = StorageManager(application)
-    private val engine = GameEngine(storage.load())
+    private var engine = GameEngine(PlayerProfile())
     private val currentState = mutableStateOf(engine.snapshot())
     val state: State<GameState> = currentState
-    val needsFrames: Boolean get() = engine.needsFrames
+    private val displayedPot = mutableLongStateOf(currentState.value.roundAmount)
+    val displayedRoundAmount: LongState = displayedPot
+    private var hudElapsed = 0.0
+    var settings by mutableStateOf(GameSettings())
+        private set
+    var loadState by mutableStateOf(LoadState.Loading)
+        private set
+    var saveFailed by mutableStateOf(false)
+        private set
+    private var loading: Job? = null
+    private var saveObserver: Job? = null
+    var paused by mutableStateOf(false)
+        private set
+    val needsFrames: Boolean get() = !paused && engine.needsFrames
+
+    init {
+        loadGame()
+    }
+
+    fun loadGame() {
+        if (loading?.isActive == true || loadState == LoadState.Ready) return
+        loadState = LoadState.Loading
+        loading = viewModelScope.launch {
+            try {
+                val saved = storage.load()
+                engine = GameEngine(saved.profile)
+                settings = saved.settings
+                publish()
+                loadState = LoadState.Ready
+            } catch (_: IOException) {
+                loadState = LoadState.Failed
+            }
+        }
+    }
+
+    fun updateSettings(value: GameSettings) {
+        if (settings == value) return
+        settings = value
+        saveGame()
+    }
+
+    fun retrySave() {
+        saveFailed = false
+        saveGame()
+    }
+
+    fun dismissSaveError() {
+        saveFailed = false
+    }
+
+    fun togglePause() {
+        if (currentState.value.phase != Phase.Playing) return
+        releaseFlight()
+        paused = !paused
+    }
+
+    fun pauseForInterruption() {
+        if (currentState.value.phase == Phase.Playing && !paused) togglePause()
+    }
+
+    fun leaveGame() {
+        paused = false
+        engine.returnToReady()
+        publish()
+    }
 
     fun resize(width: Int, height: Int) = engine.resize(width, height)
 
@@ -23,29 +101,34 @@ internal class GameViewModel(application: Application) : AndroidViewModel(applic
         if (engine.startRound()) publish()
     }
 
-    fun pressFlight(): Boolean = when (currentState.value.phase) {
-        Phase.Ready -> {
-            engine.startRound(held = true)
-            publish()
-            true
+    fun pressFlight(): Boolean {
+        if (paused) return false
+        return when (currentState.value.phase) {
+            Phase.Ready -> {
+                engine.startRound(held = true)
+                publish()
+                true
+            }
+            Phase.Playing -> {
+                engine.setThrust(true)
+                true
+            }
+            Phase.CashedOut, Phase.Crashed -> false
         }
-        Phase.Playing -> {
-            engine.setThrust(true)
-            true
-        }
-        Phase.CashedOut, Phase.Crashed -> false
     }
 
     fun releaseFlight() = engine.setThrust(false)
 
-    fun advance(deltaTime: Double): Boolean {
-        val collectedBonus = engine.advance(deltaTime)
-        publish()
-        return collectedBonus
+    fun advance(deltaTime: Double): GameEvent? {
+        if (paused || !deltaTime.isFinite() || deltaTime <= 0.0) return null
+        val event = engine.advance(deltaTime)
+        hudElapsed += deltaTime.coerceAtMost(0.08)
+        publish(save = event == GameEvent.Crash, refreshPot = event != null || hudElapsed >= 1.0 / 15.0)
+        return event
     }
 
     fun cashOut(): Boolean {
-        if (!engine.cashOut()) return false
+        if (paused || !engine.cashOut()) return false
         publish(save = true)
         return true
     }
@@ -54,10 +137,28 @@ internal class GameViewModel(application: Application) : AndroidViewModel(applic
         if (engine.buy(upgrade)) publish(save = true)
     }
 
-    private fun publish(save: Boolean = false) {
-        val snapshot = engine.snapshot()
-        if (save) storage.save(snapshot.profile)
+    private fun publish(save: Boolean = false, refreshPot: Boolean = true) {
+        val snapshot = engine.snapshot(interpolate = true)
+        if (refreshPot || snapshot.phase != currentState.value.phase) {
+            displayedPot.longValue = snapshot.roundAmount
+            hudElapsed = 0.0
+        }
         currentState.value = snapshot
+        if (save) saveGame()
+    }
+
+    private fun saveGame() {
+        val write = storage.save(SavedGame(currentState.value.profile, settings))
+        saveObserver?.cancel()
+        saveObserver = viewModelScope.launch {
+            try {
+                write.await()
+                saveFailed = false
+            } catch (_: IOException) {
+                pauseForInterruption()
+                saveFailed = true
+            }
+        }
     }
 }
 
