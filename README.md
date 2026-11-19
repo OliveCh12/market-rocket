@@ -1,21 +1,27 @@
 # Market Rocket
 
-Prototype arcade Android en Kotlin, Jetpack Compose et Material 3. Ouvrez ce dossier dans Android Studio, installez le SDK Android 35 et sélectionnez un JDK 17 ou 21 pour Gradle. Lancez la configuration `app` sur Android 7.0 ou supérieur.
+Jeu arcade Android en Kotlin, Jetpack Compose et Material 3. Ouvrez ce dossier dans Android Studio avec le SDK Android 36 et un JDK 17 ou 21. La configuration `app` fonctionne sur Android 7.0 et versions ultérieures.
 
 ```sh
 ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:assembleRelease :app:bundleRelease
+./gradlew :app:connectedDebugAndroidTest
 ```
+
+La dernière commande utilise un appareil ou un émulateur Android connecté. Le build release applique R8 et nécessite une signature de publication avant envoi sur Google Play.
 
 ## Jouer
 
-Depuis le menu, choisissez **Jouer**. Maintenez le doigt sur le graphe pour monter et relâchez pour redescendre. Passez par les anneaux dorés, évitez les pics rouges et les deux lignes qui bornent la zone de vol, puis touchez **Encaisser** pour transférer la cagnotte dans la banque. Le bouton en haut à droite met la manche en pause.
+Depuis le menu, choisissez **Jouer**. Maintenez le doigt sur le graphe pour monter et relâchez pour redescendre. Traversez un anneau doré pour débloquer **Encaisser**, puis choisissez le moment de mettre les gains en banque. Les anneaux successifs augmentent la valeur de leurs bonus. Le bouton en haut à droite met la manche en pause et une interruption demande une reprise explicite.
 
-Chaque manche fournit un capital initial de 250 € dès le départ. Entre les manches, **Améliorations** permet de dépenser le solde en banque pour augmenter ce capital, accélérer la croissance passive ou activer un bouclier qui absorbe un pic rouge par manche. Les paliers suivent le solde disponible en banque.
+Chaque manche fournit un capital initial de 250 €. Entre les manches, **Améliorations** permet de dépenser le solde en banque pour augmenter ce capital, accélérer la croissance passive ou activer un bouclier qui absorbe un pic rouge par manche. Les paliers suivent les gains cumulés et les achats débitent le solde disponible.
 
-Les **Paramètres** permettent de désactiver les vibrations et de réduire les animations du décor et les secousses.
+Les **Paramètres** donnent accès aux sons, aux vibrations, à la réduction des effets, ainsi qu’aux statistiques et objectifs locaux.
 
 ## Architecture
 
-- `GameEngine.kt` et `GameModels.kt` gèrent la simulation Kotlin et ses instantanés. Le moteur découpe le temps écoulé en pas de 1/120 s au maximum.
-- `GameScreen.kt` cadence la simulation avec `withFrameNanos` et la suspend quand l’activité quitte le premier plan. `MarketRocketCanvas.kt` lit uniquement les instantanés à l’affichage.
-- `StorageManager.kt` sauvegarde le solde, les niveaux d’amélioration et les paramètres dans des préférences locales.
+- `GameEngine.kt` fait avancer la simulation à pas fixe de 1/120 s. `CourseGenerator.kt` définit les portes d’un parcours à partir d’une seed.
+- `GameScreen.kt` suit l’horloge de l’écran avec `withFrameNanos`. `MarketRocketCanvas.kt` dessine les instantanés de rendu interpolés.
+- `StorageManager.kt` persiste le profil et les réglages dans Preferences DataStore. Le premier chargement importe la sauvegarde XML existante et conserve le fichier d’origine.
+
+[Audit, mesures et priorités](docs/audit-android.md)

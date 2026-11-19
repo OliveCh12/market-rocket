@@ -40,14 +40,15 @@ class CourseTest {
     }
 
     @Test
-    fun aPilotCanChainRingsAcrossSeedsAndScreenShapes() {
+    fun aPilotCanChainRingsThroughTopSpeedAcrossSeedsAndScreenShapes() {
+        val ringsPerFlight = 40
         for (seed in 0..11) {
             for ((width, height) in listOf(320 to 620, 640 to 640, 1_000 to 360)) {
                 val engine = GameEngine(PlayerProfile(), seed = 48)
                 engine.resize(width, height)
                 engine.startRound(seed = seed)
                 val pilot = RingPilot(engine)
-                repeat(10) { index ->
+                repeat(ringsPerFlight) { index ->
                     val frame = pilot.untilRing()
                     assertEquals("seed $seed, ${width}×$height", index + 1, frame.combo)
                 }
@@ -55,13 +56,33 @@ class CourseTest {
                 assertTrue(engine.cashOut())
                 val paid = engine.snapshot()
                 assertTrue(paid.result?.newRecord == true)
-                assertEquals(10, paid.profile.stats.bestCombo)
-                assertEquals(10L, paid.profile.stats.rings)
+                assertEquals(ringsPerFlight, paid.profile.stats.bestCombo)
+                assertEquals(ringsPerFlight.toLong(), paid.profile.stats.rings)
                 assertEquals(1L, paid.profile.stats.cashOuts)
                 assertEquals(amount, paid.profile.stats.bestCashOut)
                 assertTrue(paid.profile.stats.longestFlightMillis > 1_000L)
             }
         }
+    }
+
+    @Test
+    fun aCrashClosesTheComboAndRecordsTheRunWithoutCreditingThePot() {
+        val engine = GameEngine(PlayerProfile(bank = 800L), seed = 12)
+        engine.resize(360, 640)
+        engine.startRound()
+        assertEquals(1, RingPilot(engine).untilRing().combo)
+
+        engine.setThrust(true)
+        repeat(180) { engine.advance(1.0 / 120) }
+        val crashed = engine.snapshot()
+        assertEquals(Phase.Crashed, crashed.phase)
+        assertEquals(0, crashed.combo)
+        assertFalse(crashed.canCashOut)
+        assertEquals(800L, crashed.profile.bank)
+        assertEquals(1L, crashed.profile.stats.completedRounds)
+        assertEquals(1L, crashed.profile.stats.rings)
+        assertEquals(1, crashed.profile.stats.bestCombo)
+        assertEquals(0L, crashed.profile.stats.cashOuts)
     }
 
     @Test
