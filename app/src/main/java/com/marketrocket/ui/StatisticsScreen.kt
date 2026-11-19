@@ -35,6 +35,8 @@ internal fun StatisticsScreen(profile: PlayerProfile, onBack: () -> Unit) {
         Text("Objectifs", fontWeight = FontWeight.Bold, fontSize = 19.sp, color = WhiteInk)
         Objective("Premier encaissement", "${stats.cashOuts.coerceAtMost(1)} / 1", stats.cashOuts > 0L)
         Objective("Trois anneaux d’affilée", "${stats.bestCombo.coerceAtMost(3)} / 3", stats.bestCombo >= 3)
+        Objective("Huit anneaux d’affilée", "${stats.bestCombo.coerceAtMost(8)} / 8", stats.bestCombo >= 8)
+        Objective("Voler une minute", "${duration.coerceAtMost(60)} / 60 s", duration >= 60)
         Objective(
             "Atteindre le palier ${nextMilestone.name}",
             "${formatMoney(profile.lifetimeEarnings.coerceAtMost(nextMilestone.threshold))} / ${formatMoney(nextMilestone.threshold)}",

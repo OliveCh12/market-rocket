@@ -19,14 +19,21 @@ class CourseTest {
         for (seed in 0..63) {
             val gates = course(seed)
             for (gate in gates) {
-                val obstacle = gate.obstacle
                 val ringY = gate.bonus.center.y
-                if (obstacle.edge == Edge.Floor) {
-                    assertTrue(obstacle.tipY > 0.5f + PLAYER_RADIUS)
-                    assertTrue(ringY + RING_RADIUS + PLAYER_RADIUS < obstacle.tipY)
-                } else {
-                    assertTrue(obstacle.tipY < 0.5f - PLAYER_RADIUS)
-                    assertTrue(ringY - RING_RADIUS - PLAYER_RADIUS > obstacle.tipY)
+                val clearance = gate.bonus.kind.radius + PLAYER_RADIUS
+                for (obstacle in listOfNotNull(gate.obstacle, gate.opposite)) {
+                    assertTrue(obstacle.tipY in 0f..1f)
+                    if (obstacle.edge == Edge.Floor) {
+                        assertTrue(ringY + clearance < obstacle.tipY)
+                    } else {
+                        assertTrue(ringY - clearance > obstacle.tipY)
+                    }
+                }
+                if (gate.bonus.kind == BonusKind.Premium) {
+                    val other = checkNotNull(gate.opposite)
+                    assertEquals(gate.obstacle.x, other.x, 0f)
+                    val safeLane = (gate.obstacle.tipY + other.tipY) * 0.5f
+                    assertTrue(abs(ringY - safeLane) > clearance)
                 }
             }
             for ((before, after) in gates.zipWithNext()) {
@@ -37,6 +44,37 @@ class CourseTest {
                 assertTrue(travelGap / MAX_FLIGHT_SPEED + 0.0001 > requiredTime)
             }
         }
+    }
+
+    @Test
+    fun laterPhrasesNarrowTheGapAndRequireSwitchingFromOneSideToTheOther() {
+        val generator = CourseGenerator(42)
+        val gates = List(32) { generator.next() }
+        fun gap(gate: CourseGate) = abs(gate.obstacle.tipY - checkNotNull(gate.opposite).tipY)
+        val firstPremium = gates[3]
+        val latePremium = gates[31]
+        assertTrue(gap(latePremium) < gap(firstPremium) - 0.08f)
+        for (gate in gates.subList(29, 31)) {
+            val other = checkNotNull(gate.opposite)
+            assertFalse(0.5f in minOf(gate.obstacle.tipY, other.tipY)..maxOf(gate.obstacle.tipY, other.tipY))
+        }
+        assertTrue((gates[29].bonus.center.y - 0.5f) * (gates[30].bonus.center.y - 0.5f) < 0f)
+    }
+
+    @Test
+    fun flyingExactlyThroughTheMiddleEventuallyHitsAClosingGate() {
+        val engine = GameEngine(PlayerProfile(), seed = 48)
+        engine.resize(320, 620)
+        engine.startRound(seed = 0)
+        val pilot = RingPilot(engine)
+
+        repeat(40 * 120) {
+            if (pilot.tick { 0.5f } == GameEvent.Crash) {
+                assertEquals(Impact.Volatility, engine.snapshot().result?.impact)
+                return
+            }
+        }
+        error("The straight route should eventually meet a spike")
     }
 
     @Test
@@ -56,6 +94,8 @@ class CourseTest {
                 assertTrue(engine.cashOut())
                 val paid = engine.snapshot()
                 assertTrue(paid.result?.newRecord == true)
+                assertEquals(ringsPerFlight, paid.result?.rings)
+                assertEquals(ringsPerFlight, paid.result?.bestCombo)
                 assertEquals(ringsPerFlight, paid.profile.stats.bestCombo)
                 assertEquals(ringsPerFlight.toLong(), paid.profile.stats.rings)
                 assertEquals(1L, paid.profile.stats.cashOuts)
@@ -86,13 +126,13 @@ class CourseTest {
     }
 
     @Test
-    fun missingARingResetsComboButKeepsCashOutUnlocked() {
+    fun theSafeLaneCanBypassAPremiumRingWithoutLockingCashOut() {
         val engine = GameEngine(PlayerProfile(), seed = 12)
         engine.resize(360, 640)
         engine.startRound()
         val pilot = RingPilot(engine)
-        pilot.untilRing()
-        assertEquals(2, pilot.untilRing().combo)
+        repeat(2) { pilot.untilRing() }
+        assertEquals(3, pilot.untilRing().combo)
 
         repeat(480) {
             val frame = engine.snapshot()
@@ -100,10 +140,11 @@ class CourseTest {
                 assertEquals(Phase.Playing, frame.phase)
                 assertTrue(frame.canCashOut)
                 assertTrue(engine.cashOut())
-                assertEquals(2, engine.snapshot().profile.stats.bestCombo)
+                assertEquals(3, engine.snapshot().profile.stats.bestCombo)
+                assertEquals(3L, engine.snapshot().profile.stats.rings)
                 return
             }
-            pilot.tick { gate -> if (gate.obstacle.edge == Edge.Ceiling) 0.74f else 0.26f }
+            pilot.tick { gate -> (gate.obstacle.tipY + checkNotNull(gate.opposite).tipY) * 0.5f }
         }
         error("The skipped ring was not resolved")
     }
@@ -128,11 +169,45 @@ class CourseTest {
     }
 
     @Test
-    fun comboIncreasesOnlyTheRingBonusAndCapsTheBoost() {
-        assertEquals(1_250.0, BonusKind.Cash.collect(1_000.0, 1), 0.001)
-        assertEquals(1_275.0, BonusKind.Cash.collect(1_000.0, 2), 0.001)
-        assertEquals(1_750.0, BonusKind.Leverage.collect(1_000.0, 60), 0.001)
-        assertEquals(2_500.0, BonusKind.Double.collect(1_000.0, 6), 0.001)
+    fun comboIncreasesOnlyTheRingValueAndCapsTheBoost() {
+        val bonus = Bonus(WorldPoint(0f, 0.5f), BonusKind.Premium, 130)
+        assertEquals(130L, bonus.payout(1))
+        assertEquals(140L, bonus.payout(2))
+        assertEquals(192L, bonus.payout(7))
+        assertEquals(192L, bonus.payout(60))
+    }
+
+    @Test
+    fun aPerfectFlightPaysOutWithinTheExpectedBudgetAtAnyUpgradeLevel() {
+        for (level in 0..8) {
+            val profile = PlayerProfile(capitalLevel = level, leverageLevel = level)
+            val engine = GameEngine(profile, seed = 48)
+            engine.resize(320, 620)
+            engine.startRound(seed = 0)
+            val pilot = RingPilot(engine)
+            var bonusesWon = 0L
+            repeat(40) { index ->
+                val frame = pilot.untilRing()
+                bonusesWon += frame.rewards.last().amount
+                val rings = index + 1
+                val ceiling = when (rings) {
+                    1 -> 750
+                    4 -> 1_500
+                    8 -> 2_500
+                    24 -> 8_000
+                    40 -> 15_000
+                    else -> null
+                }
+                if (ceiling != null) assertTrue("level=$level, rings=$rings, amount=${frame.roundAmount}", frame.roundAmount < ceiling)
+                if (level in listOf(0, 8) && rings in listOf(1, 4, 8, 16, 24, 40)) {
+                    println("level=$level rings=$rings seconds=${frame.effectsTime} amount=${frame.roundAmount}")
+                }
+            }
+            assertTrue(engine.cashOut())
+            val stats = engine.snapshot().profile.stats
+            val income = stats.longestFlightMillis * profile.incomePerSecond / 1_000
+            assertEquals(profile.startingCapital + bonusesWon + income, stats.bestCashOut)
+        }
     }
 
     private class RingPilot(private val engine: GameEngine) {
@@ -158,7 +233,8 @@ class CourseTest {
             val next = frame.bonuses.firstOrNull()
             if (next != null && (gate == null || (frame.player.x > clearance && next != gate.bonus))) {
                 val obstacle = frame.obstacles.first { abs(it.x - next.center.x - RING_LEAD) < 0.0001f }
-                active = CourseGate(obstacle, next)
+                val opposite = frame.obstacles.firstOrNull { it.x == obstacle.x && it.edge != obstacle.edge }
+                active = CourseGate(obstacle, next, opposite)
                 target = aim(checkNotNull(active))
             }
             val verticalSpeed = (frame.player.y - previousY) * 120f

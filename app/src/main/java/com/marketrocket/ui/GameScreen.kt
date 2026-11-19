@@ -4,7 +4,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -338,7 +341,7 @@ private fun FlightHint(lesson: FlightLesson, modifier: Modifier) {
         FlightLesson.Hold -> Symbol.Up to "Maintenez pour monter"
         FlightLesson.Release -> Symbol.Down to "Relâchez pour redescendre"
         FlightLesson.Collect -> Symbol.Trend to "Traversez un anneau doré"
-        FlightLesson.CashOut -> Symbol.Deposit to "Encaissez pour mettre les gains à l’abri"
+        FlightLesson.CashOut -> Symbol.Deposit to "Encaissez ou visez le prochain anneau"
     }
     Row(
         modifier.semantics { liveRegion = LiveRegionMode.Polite },
@@ -434,20 +437,29 @@ private fun CashButtonAmount(amount: String, color: Color) {
 
 @Composable
 private fun RoundOutcome(result: RoundResult, reduceEffects: Boolean, modifier: Modifier) {
-    val color = if (result.impact == null) Mint else CoralText
-    val label = if (result.impact == null) "ENCAISSÉ" else "KRACH"
+    val cashedOut = result.impact == null
+    val color = if (cashedOut) Mint else CoralText
+    val label = if (cashedOut) "ENCAISSÉ" else "KRACH"
     val detail = when (result.impact) {
         null -> if (result.newRecord) "Nouveau record d’encaissement" else "Versé en banque"
         Impact.Ceiling -> "Plafond touché"
         Impact.Floor -> "Sol touché"
         Impact.Volatility -> "Pic de volatilité"
     }
+    val enter = when {
+        reduceEffects -> EnterTransition.None
+        cashedOut -> fadeIn(tween(150)) + scaleIn(
+            animationSpec = spring(dampingRatio = 0.70f, stiffness = Spring.StiffnessMediumLow),
+            initialScale = 0.85f,
+        )
+        else -> fadeIn(tween(130)) + scaleIn(tween(170), initialScale = 0.95f)
+    }
     key(result) {
         var visible by remember { mutableStateOf(false) }
         LaunchedEffect(Unit) { visible = true }
         AnimatedVisibility(
             visible = visible,
-            enter = if (reduceEffects) EnterTransition.None else fadeIn() + scaleIn(initialScale = 0.92f),
+            enter = enter,
             exit = ExitTransition.None,
             modifier = modifier,
         ) {
@@ -460,11 +472,16 @@ private fun RoundOutcome(result: RoundResult, reduceEffects: Boolean, modifier: 
             ) {
                 Text(label, color = color, style = MarketLabel.copy(fontSize = 12.sp, letterSpacing = 1.8.sp))
                 Text(
-                    (if (result.impact == null) "+" else "−") + formatMoney(result.amount),
+                    (if (cashedOut) "+" else "−") + formatMoney(result.amount),
                     style = MarketMoney.copy(fontSize = 34.sp, lineHeight = 42.sp),
                     color = WhiteInk,
                 )
                 Text(detail, color = MutedInk, fontSize = 12.sp)
+                if (result.rings > 0) {
+                    val rings = if (result.rings == 1) "1 anneau" else "${result.rings} anneaux"
+                    val streak = if (result.bestCombo > 1) " · Série ×${result.bestCombo}" else ""
+                    Text(rings + streak, color = color, fontSize = 11.sp, modifier = Modifier.padding(top = 7.dp))
+                }
             }
         }
     }

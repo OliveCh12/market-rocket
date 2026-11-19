@@ -93,8 +93,8 @@ private fun UpgradeCard(upgrade: Upgrade, profile: PlayerProfile, onBuy: () -> U
         Upgrade.Leverage -> Triple(
             Symbol.Bolt,
             Mint,
-            if (price == null) "+${growthPercent(profile.growthPerSecond)} / s" else
-                "+${growthPercent(profile.growthPerSecond)} → +${growthPercent(nextProfile.growthPerSecond)} / s",
+            if (price == null) "+${profile.incomePerSecond} €/s" else
+                "+${profile.incomePerSecond} → +${nextProfile.incomePerSecond} €/s",
         )
         Upgrade.Shield -> Triple(Symbol.Shield, Color(0xFFBEC6FF), "Absorbe un pic rouge par manche")
     }
@@ -117,7 +117,7 @@ private fun UpgradeCard(upgrade: Upgrade, profile: PlayerProfile, onBuy: () -> U
             Text(
                 effect,
                 color = MutedInk,
-                style = MarketLabel.copy(fontSize = 10.sp, letterSpacing = 0.sp),
+                style = MarketMoney.copy(fontSize = 10.sp, lineHeight = 14.sp, letterSpacing = 0.sp),
             )
         }
         if (price == null) {

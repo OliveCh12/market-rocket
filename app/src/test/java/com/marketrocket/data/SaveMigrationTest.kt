@@ -31,7 +31,7 @@ class SaveMigrationTest {
         val loaded = decodeSave(migrated.asMap().mapKeys { it.key.name })
         assertEquals(4_000L, loaded.profile.bank)
         assertEquals(11_000L, loaded.profile.lifetimeEarnings)
-        assertEquals(500L, loaded.profile.startingCapital)
+        assertEquals(205L, loaded.profile.startingCapital)
         assertEquals(1, loaded.profile.leverageLevel)
         assertEquals(1, loaded.profile.shieldLevel)
         assertEquals("Freelance", loaded.profile.tierProgress.current.name)
@@ -58,5 +58,18 @@ class SaveMigrationTest {
         assertEquals(Upgrade.Capital.maxLevel, corrupt.profile.capitalLevel)
         val tracked = decodeSave(mapOf(SaveKeys.BANK to 4_000L, SaveKeys.CAPITAL to 1, SaveKeys.EARNINGS to 6_000L))
         assertEquals(6_000L, tracked.profile.lifetimeEarnings)
+    }
+
+    @Test
+    fun missingLifetimeEarningsUseThePricesActuallyPaidByLegacyPlayers() {
+        val loaded = decodeSave(mapOf<String, Any>(
+            SaveKeys.BANK to 1_000L,
+            SaveKeys.CAPITAL to 2,
+            SaveKeys.LEVERAGE to 2,
+        ))
+        assertEquals(1_000L, loaded.profile.bank)
+        assertEquals(9_600L, loaded.profile.lifetimeEarnings)
+        assertEquals(260L, loaded.profile.startingCapital)
+        assertEquals(20L, loaded.profile.incomePerSecond)
     }
 }
