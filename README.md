@@ -10,6 +10,10 @@ Jeu arcade Android en Kotlin, Jetpack Compose et Material 3. Ouvrez ce dossier d
 
 La dernière commande utilise un appareil ou un émulateur Android connecté. Le build release applique R8 et nécessite une signature de publication avant envoi sur Google Play.
 
+## Installer la version 1.1
+
+L’APK de test signé avec le même certificat que les APK précédents peut être installé directement par-dessus la version 1.0. Au premier lancement, Market Rocket reprend le solde, les améliorations et les réglages existants. Installer la mise à jour sans désinstaller l’application conserve sa sauvegarde locale.
+
 ## Jouer
 
 Depuis le menu, choisissez **Jouer**. Maintenez le doigt sur le graphe pour monter et relâchez pour redescendre. Traversez un anneau doré pour débloquer **Encaisser**, puis choisissez le moment de mettre les gains en banque. Les anneaux successifs augmentent la valeur de leurs bonus. Le bouton en haut à droite met la manche en pause et une interruption demande une reprise explicite.
