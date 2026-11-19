@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MarketRocket" parent="Base.Theme.MarketRocket">
+        <item name="android:windowSplashScreenBackground">@color/rocket_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_market_rocket</item>
+    </style>
+</resources>
