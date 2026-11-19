@@ -1,6 +1,5 @@
 package com.marketrocket.ui
 
-import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -25,6 +24,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -46,7 +46,9 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -54,12 +56,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.progressBarRangeInfo
@@ -74,23 +76,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.marketrocket.GameViewModel
 import com.marketrocket.game.GameEvent
+import com.marketrocket.game.FlightLesson
 import com.marketrocket.game.GameState
 import com.marketrocket.game.Impact
 import com.marketrocket.game.Phase
 import com.marketrocket.game.PlayerProfile
 import com.marketrocket.game.RoundResult
 import kotlinx.coroutines.isActive
-
-private val bonusHaptic = when {
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> HapticFeedbackType.SegmentTick
-    Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 -> HapticFeedbackType.TextHandleMove
-    else -> HapticFeedbackType.LongPress
-}
-private val cashOutHaptic = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-    HapticFeedbackType.Confirm
-} else {
-    HapticFeedbackType.LongPress
-}
 
 @Composable
 internal fun GameScreen(viewModel: GameViewModel, onMenu: () -> Unit) {
@@ -99,23 +91,33 @@ internal fun GameScreen(viewModel: GameViewModel, onMenu: () -> Unit) {
     val profile by remember(state) { derivedStateOf { state.value.profile } }
     val result by remember(state) { derivedStateOf { state.value.result } }
     val shield by remember(state) { derivedStateOf { state.value.hasShield } }
+    val combo by remember(state) { derivedStateOf { state.value.combo } }
+    val lesson by remember(state) { derivedStateOf { state.value.lesson } }
     val reduceEffects = viewModel.settings.reduceEffects
     val paused = viewModel.paused
-    val haptics = LocalHapticFeedback.current
+    val feedback = rememberGameFeedback(viewModel.settings)
     var shopOpen by rememberSaveable { mutableStateOf(false) }
+    var hudHeight by remember { mutableIntStateOf(0) }
+    var controlsHeight by remember { mutableIntStateOf(0) }
     val onBack: () -> Unit = {
         if (phase == Phase.Playing) viewModel.togglePause() else onMenu()
     }
 
     BackHandler(enabled = !shopOpen, onBack = onBack)
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { viewModel.pauseForInterruption() }
-    RunFrameClock(viewModel)
+    RunFrameClock(viewModel, feedback)
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Obsidian)) {
         val insets = WindowInsets.safeDrawing.asPaddingValues()
-        val fontExtra = (LocalDensity.current.fontScale - 1f).coerceIn(0f, 1.5f)
-        val ceiling = minOf(insets.calculateTopPadding() + 60.dp + 32.dp * fontExtra, maxHeight * 0.30f)
-        val floor = minOf(insets.calculateBottomPadding() + 74.dp + 12.dp * fontExtra, maxHeight * 0.30f)
+        val density = LocalDensity.current
+        val ceiling = minOf(
+            maxOf(insets.calculateTopPadding() + 60.dp, with(density) { hudHeight.toDp() } + 4.dp),
+            maxHeight * 0.30f,
+        )
+        val floor = minOf(
+            maxOf(insets.calculateBottomPadding() + 74.dp, with(density) { controlsHeight.toDp() } + 6.dp),
+            maxHeight * 0.32f,
+        )
         val gutter = if (maxWidth < 365.dp) 16.dp else 22.dp
 
         MarketBackdrop(Modifier.matchParentSize(), state, reduceEffects)
@@ -125,6 +127,8 @@ internal fun GameScreen(viewModel: GameViewModel, onMenu: () -> Unit) {
             modifier = Modifier.matchParentSize()
                 .padding(top = ceiling, bottom = floor)
                 .onSizeChanged { viewModel.resize(it.width, it.height) }
+                .testTag("flight-field")
+                .semantics { contentDescription = "Zone de vol. Maintenez pour monter, relâchez pour descendre." }
                 .flightControl(viewModel, paused || shopOpen),
         )
 
@@ -132,20 +136,24 @@ internal fun GameScreen(viewModel: GameViewModel, onMenu: () -> Unit) {
             GameHud(
                 profile = profile,
                 shield = shield && phase == Phase.Playing,
+                combo = if (phase == Phase.Playing) combo else 0,
                 playing = phase == Phase.Playing,
                 reduceEffects = reduceEffects,
                 onBack = onBack,
                 modifier = Modifier.align(Alignment.TopCenter)
+                    .onSizeChanged { hudHeight = it.height }
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                     .padding(horizontal = gutter, vertical = 4.dp),
             )
         }
 
-        if (phase == Phase.Ready && maxHeight >= 420.dp) {
+        val showLesson = phase == Phase.Ready || (phase == Phase.Playing && profile.stats.cashOuts == 0L)
+        if (showLesson && !paused && maxHeight >= 420.dp) {
             FlightHint(
-                Modifier.align(Alignment.BottomStart)
+                lesson = lesson,
+                modifier = Modifier.align(Alignment.BottomStart)
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-                    .padding(start = gutter, bottom = floor + 24.dp),
+                    .padding(start = gutter, end = gutter, bottom = floor + 21.dp),
             )
         }
 
@@ -162,18 +170,18 @@ internal fun GameScreen(viewModel: GameViewModel, onMenu: () -> Unit) {
                 state = state,
                 displayedAmount = viewModel.displayedRoundAmount,
                 phase = phase,
-                compact = maxWidth < 350.dp,
+                compact = maxWidth < 350.dp || density.fontScale >= 1.3f,
+                stacked = density.fontScale >= 1.45f,
                 onAction = {
                     if (phase == Phase.Playing) {
-                        if (viewModel.cashOut() && viewModel.settings.hapticsEnabled) {
-                            haptics.performHapticFeedback(cashOutHaptic)
-                        }
+                        if (viewModel.cashOut()) feedback(GameEvent.CashOut)
                     } else {
                         viewModel.startRound()
                     }
                 },
                 onShop = { shopOpen = true },
                 modifier = Modifier.align(Alignment.BottomCenter)
+                    .onSizeChanged { controlsHeight = it.height }
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
                     .padding(start = gutter, end = gutter, bottom = 12.dp)
                     .widthIn(max = 472.dp)
@@ -216,13 +224,13 @@ private fun Modifier.flightControl(viewModel: GameViewModel, blocked: Boolean): 
     }
 
 @Composable
-private fun RunFrameClock(viewModel: GameViewModel) {
+private fun RunFrameClock(viewModel: GameViewModel, feedback: (GameEvent) -> Unit) {
     val ticking by remember(viewModel) {
         derivedStateOf { !viewModel.paused && viewModel.state.value.needsFrames }
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val haptics = LocalHapticFeedback.current
-    LaunchedEffect(viewModel, lifecycle, haptics, ticking) {
+    val currentFeedback by rememberUpdatedState(feedback)
+    LaunchedEffect(viewModel, lifecycle, ticking) {
         if (!ticking) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             var previous = withFrameNanos { it }
@@ -230,9 +238,7 @@ private fun RunFrameClock(viewModel: GameViewModel) {
                 while (isActive && viewModel.needsFrames) {
                     val now = withFrameNanos { it }
                     val event = viewModel.advance((now - previous) / 1_000_000_000.0)
-                    if (event == GameEvent.Ring && viewModel.settings.hapticsEnabled) {
-                        haptics.performHapticFeedback(bonusHaptic)
-                    }
+                    if (event != null) currentFeedback(event)
                     previous = now
                 }
             } finally {
@@ -246,6 +252,7 @@ private fun RunFrameClock(viewModel: GameViewModel) {
 private fun GameHud(
     profile: PlayerProfile,
     shield: Boolean,
+    combo: Int,
     playing: Boolean,
     reduceEffects: Boolean,
     onBack: () -> Unit,
@@ -267,7 +274,7 @@ private fun GameHud(
                     formatMoney(profile.bank),
                     color = WhiteInk,
                     style = MarketMoney.copy(fontSize = 21.sp, lineHeight = 25.sp, letterSpacing = (-0.6).sp),
-                    modifier = Modifier.alignByBaseline(),
+                    modifier = Modifier.weight(1f, fill = false).alignByBaseline(),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -281,7 +288,7 @@ private fun GameHud(
                     lineHeight = 15.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.alignByBaseline(),
+                    modifier = Modifier.weight(1f, fill = false).alignByBaseline(),
                 )
                 progress.next?.let { next ->
                     Text(
@@ -297,10 +304,21 @@ private fun GameHud(
             Box(
                 Modifier.widthIn(max = 154.dp).fillMaxWidth().height(2.dp)
                     .background(WhiteInk.copy(alpha = 0.14f), CircleShape)
-                    .semantics { progressBarRangeInfo = ProgressBarRangeInfo(progress.fraction, 0f..1f) },
+                    .semantics {
+                        contentDescription = "Progression du palier selon les gains cumulés"
+                        progressBarRangeInfo = ProgressBarRangeInfo(progress.fraction, 0f..1f)
+                    },
             ) {
                 Box(Modifier.fillMaxWidth(fill).height(2.dp).background(Mint, CircleShape))
             }
+        }
+        if (combo > 1) {
+            Text(
+                "×$combo",
+                color = Gold,
+                style = MarketLabel.copy(fontSize = 12.sp),
+                modifier = Modifier.semantics { contentDescription = "Combo de $combo anneaux" },
+            )
         }
         if (shield) MarketIcon(Symbol.Shield, Mint, Modifier.size(20.dp), "Bouclier actif")
         IconButton(onClick = onBack) {
@@ -315,15 +333,21 @@ private fun GameHud(
 }
 
 @Composable
-private fun FlightHint(modifier: Modifier) {
+private fun FlightHint(lesson: FlightLesson, modifier: Modifier) {
+    val (icon, text) = when (lesson) {
+        FlightLesson.Hold -> Symbol.Up to "Maintenez pour monter"
+        FlightLesson.Release -> Symbol.Down to "Relâchez pour redescendre"
+        FlightLesson.Collect -> Symbol.Trend to "Traversez un anneau doré"
+        FlightLesson.CashOut -> Symbol.Deposit to "Encaissez pour mettre les gains à l’abri"
+    }
     Row(
-        modifier,
+        modifier.semantics { liveRegion = LiveRegionMode.Polite },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        MarketIcon(Symbol.Up, Mint, Modifier.size(17.dp))
+        MarketIcon(icon, Mint, Modifier.size(17.dp))
         Text(
-            "Maintenez pour monter\nRelâchez pour descendre",
+            text,
             color = MutedInk,
             fontSize = 11.sp,
             lineHeight = 16.sp,
@@ -337,6 +361,7 @@ private fun RoundControls(
     displayedAmount: LongState,
     phase: Phase,
     compact: Boolean,
+    stacked: Boolean,
     onAction: () -> Unit,
     onShop: () -> Unit,
     modifier: Modifier = Modifier,
@@ -368,25 +393,18 @@ private fun RoundControls(
                     disabledContainerColor = Panel,
                     disabledContentColor = MutedInk,
                 ),
-                contentPadding = PaddingValues(horizontal = 15.dp),
-                modifier = Modifier.weight(1f).height(54.dp),
+                contentPadding = PaddingValues(horizontal = 15.dp, vertical = 8.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 54.dp),
             ) {
                 MarketIcon(symbol, if (locked) MutedInk else ButtonInk, Modifier.size(17.dp))
-                Text(
-                    label,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    modifier = Modifier.weight(1f).padding(start = 9.dp),
-                )
-                if (inFlight || phase == Phase.Ready) {
-                    Text(
-                        if (canCashOut) "+$amount" else amount,
-                        color = if (locked) MutedInk else ButtonInk,
-                        style = MarketMoney.copy(fontSize = 16.sp, lineHeight = 21.sp, letterSpacing = (-0.5).sp),
-                        maxLines = 1,
-                    )
+                val showAmount = inFlight || phase == Phase.Ready
+                val display = if (canCashOut) "+$amount" else amount
+                val tint = if (locked) MutedInk else ButtonInk
+                Column(Modifier.weight(1f).padding(start = 9.dp)) {
+                    Text(label, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 2)
+                    if (stacked && showAmount) CashButtonAmount(display, tint)
                 }
+                if (!stacked && showAmount) CashButtonAmount(display, tint)
             }
         }
         if (!inFlight) {
@@ -405,11 +423,21 @@ private fun RoundControls(
 }
 
 @Composable
+private fun CashButtonAmount(amount: String, color: Color) {
+    Text(
+        amount,
+        color = color,
+        style = MarketMoney.copy(fontSize = 16.sp, lineHeight = 21.sp, letterSpacing = (-0.5).sp),
+        maxLines = 1,
+    )
+}
+
+@Composable
 private fun RoundOutcome(result: RoundResult, reduceEffects: Boolean, modifier: Modifier) {
     val color = if (result.impact == null) Mint else CoralText
     val label = if (result.impact == null) "ENCAISSÉ" else "KRACH"
     val detail = when (result.impact) {
-        null -> "Versé en banque"
+        null -> if (result.newRecord) "Nouveau record d’encaissement" else "Versé en banque"
         Impact.Ceiling -> "Plafond touché"
         Impact.Floor -> "Sol touché"
         Impact.Volatility -> "Pic de volatilité"

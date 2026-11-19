@@ -9,6 +9,7 @@ import com.marketrocket.game.earningsBeforeTracking
 internal data class GameSettings(
     val hapticsEnabled: Boolean = true,
     val reduceEffects: Boolean = false,
+    val soundEnabled: Boolean = true,
 )
 
 internal class StorageManager(context: Context) {
@@ -57,6 +58,7 @@ internal class StorageManager(context: Context) {
         return GameSettings(
             hapticsEnabled = values[HAPTICS] as? Boolean ?: true,
             reduceEffects = values[REDUCE_EFFECTS] as? Boolean ?: false,
+            soundEnabled = values[SOUND] as? Boolean ?: true,
         )
     }
 
@@ -64,6 +66,7 @@ internal class StorageManager(context: Context) {
         preferences.edit {
             putBoolean(HAPTICS, settings.hapticsEnabled)
             putBoolean(REDUCE_EFFECTS, settings.reduceEffects)
+            putBoolean(SOUND, settings.soundEnabled)
         }
     }
 
@@ -81,6 +84,7 @@ internal class StorageManager(context: Context) {
         const val FLIGHT = "longest_flight_ms"
         const val HAPTICS = "haptics_enabled"
         const val REDUCE_EFFECTS = "reduce_effects"
+        const val SOUND = "sound_enabled"
     }
 }
 

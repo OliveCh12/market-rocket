@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +34,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +52,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -57,7 +60,7 @@ import androidx.compose.ui.unit.sp
 import com.marketrocket.GameViewModel
 import com.marketrocket.data.GameSettings
 
-private enum class Destination { Menu, Game, Settings }
+private enum class Destination { Menu, Game, Settings, Statistics }
 
 @Composable
 internal fun MarketRocketApp(viewModel: GameViewModel) {
@@ -73,8 +76,14 @@ internal fun MarketRocketApp(viewModel: GameViewModel) {
             viewModel.leaveGame()
             destination = Destination.Menu
         }
-        Destination.Settings -> SettingsScreen(settings, viewModel::updateSettings) {
-            destination = Destination.Menu
+        Destination.Settings -> SettingsScreen(
+            settings,
+            viewModel::updateSettings,
+            onStatistics = { destination = Destination.Statistics },
+            onBack = { destination = Destination.Menu },
+        )
+        Destination.Statistics -> StatisticsScreen(viewModel.state.value.profile) {
+            destination = Destination.Settings
         }
     }
 }
@@ -89,8 +98,9 @@ private fun HomeScreen(reduceEffects: Boolean, onPlay: () -> Unit, onSettings: (
         ) {
             val compact = maxHeight < 500.dp
             val side = if (maxWidth < 360.dp) 20.dp else 28.dp
-            val headline = if (compact) 42.sp else 60.sp
-            val headlineHeight = if (compact) 39.sp else 53.sp
+            val maximumHeadline = (maxWidth.value - 2f * side.value) / (4.0f * LocalDensity.current.fontScale)
+            val headline = minOf(if (compact) 42f else 60f, maximumHeadline.coerceAtLeast(16f)).sp
+            val headlineHeight = (headline.value * 0.9f).sp
             Column(
                 Modifier.align(Alignment.TopStart).padding(
                     start = side,
@@ -104,6 +114,7 @@ private fun HomeScreen(reduceEffects: Boolean, onPlay: () -> Unit, onSettings: (
                     fontSize = headline,
                     lineHeight = headlineHeight,
                     letterSpacing = (-2.7).sp,
+                    maxLines = 1,
                 )
                 Text(
                     "ROCKET",
@@ -112,6 +123,7 @@ private fun HomeScreen(reduceEffects: Boolean, onPlay: () -> Unit, onSettings: (
                     fontSize = headline,
                     lineHeight = headlineHeight,
                     letterSpacing = (-2.7).sp,
+                    maxLines = 1,
                 )
             }
             Column(
@@ -209,8 +221,40 @@ private fun HomeChart(modifier: Modifier, reduceEffects: Boolean) {
 private fun SettingsScreen(
     settings: GameSettings,
     onChange: (GameSettings) -> Unit,
+    onStatistics: () -> Unit,
     onBack: () -> Unit,
 ) {
+    MenuPage("Paramètres", onBack) {
+        SettingSwitch(
+            title = "Sons du jeu",
+            detail = "Anneaux, encaissement et krach",
+            checked = settings.soundEnabled,
+            onCheckedChange = { onChange(settings.copy(soundEnabled = it)) },
+        )
+        HorizontalDivider(color = Line)
+        SettingSwitch(
+            title = "Vibrations",
+            detail = "Bonus, encaissements et collisions",
+            checked = settings.hapticsEnabled,
+            onCheckedChange = { onChange(settings.copy(hapticsEnabled = it)) },
+        )
+        HorizontalDivider(color = Line)
+        SettingSwitch(
+            title = "Réduire les effets",
+            detail = "Atténue les secousses et les animations du décor",
+            checked = settings.reduceEffects,
+            onCheckedChange = { onChange(settings.copy(reduceEffects = it)) },
+        )
+        HorizontalDivider(color = Line)
+        TextButton(onClick = onStatistics, modifier = Modifier.fillMaxWidth()) {
+            Text("Statistiques et objectifs", modifier = Modifier.weight(1f), color = WhiteInk)
+            MarketIcon(Symbol.Chevron, Mint, Modifier.size(18.dp))
+        }
+    }
+}
+
+@Composable
+internal fun MenuPage(title: String, onBack: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     BackHandler(onBack = onBack)
     Box(Modifier.fillMaxSize().background(Obsidian)) {
         MarketBackdrop(Modifier.matchParentSize(), reduceEffects = true)
@@ -224,28 +268,14 @@ private fun SettingsScreen(
                     MarketIcon(Symbol.Back, WhiteInk, Modifier.size(22.dp), "Retour au menu")
                 }
                 Text(
-                    "Paramètres",
+                    title,
                     color = WhiteInk,
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(start = 8.dp),
                 )
             }
-            Column(Modifier.padding(top = 20.dp)) {
-                SettingSwitch(
-                    title = "Vibrations",
-                    detail = "Lors d’un bonus ou d’un encaissement",
-                    checked = settings.hapticsEnabled,
-                    onCheckedChange = { onChange(settings.copy(hapticsEnabled = it)) },
-                )
-                HorizontalDivider(color = Line)
-                SettingSwitch(
-                    title = "Réduire les effets",
-                    detail = "Atténue les secousses et les animations du décor",
-                    checked = settings.reduceEffects,
-                    onCheckedChange = { onChange(settings.copy(reduceEffects = it)) },
-                )
-            }
+            Column(Modifier.padding(top = 20.dp), content = content)
         }
     }
 }
