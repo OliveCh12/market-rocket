@@ -8,7 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.ui.graphics.toArgb
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.marketrocket.ui.GameScreen
+import com.marketrocket.ui.MarketRocketApp
 import com.marketrocket.ui.MarketRocketTheme
 import com.marketrocket.ui.Obsidian
 
@@ -22,7 +22,7 @@ class MainActivity : ComponentActivity() {
         preferHighRefreshRate()
         setContent {
             MarketRocketTheme {
-                GameScreen(viewModel<GameViewModel>())
+                MarketRocketApp(viewModel<GameViewModel>())
             }
         }
     }

@@ -77,6 +77,16 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         return true
     }
 
+    fun returnToReady() {
+        if (phase == Phase.Ready) return
+        resetCourse()
+        phase = Phase.Ready
+        pot = profile.startingCapital.toDouble()
+        result = null
+        thrust = false
+        hasShield = profile.shieldLevel > 0
+    }
+
     fun setThrust(enabled: Boolean) {
         thrust = enabled && phase == Phase.Playing
     }

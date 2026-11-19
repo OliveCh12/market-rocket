@@ -74,6 +74,25 @@ class GameEngineTest {
     }
 
     @Test
+    fun leavingTheGameDiscardsTheActiveRoundAndRetainsTheProfile() {
+        val profile = PlayerProfile(bank = 6_000, capitalLevel = 1, shieldLevel = 1)
+        val engine = GameEngine(profile, seed = 12)
+        val initialPlayer = engine.snapshot().player
+        assertTrue(engine.startRound(held = true))
+        repeat(30) { engine.advance(1.0 / 60) }
+        assertTrue(engine.snapshot().roundAmount > profile.startingCapital)
+
+        engine.returnToReady()
+        val ready = engine.snapshot()
+        assertEquals(Phase.Ready, ready.phase)
+        assertEquals(initialPlayer, ready.player)
+        assertEquals(profile, ready.profile)
+        assertEquals(profile.startingCapital, ready.roundAmount)
+        assertTrue(ready.hasShield)
+        assertFalse(ready.needsFrames)
+    }
+
+    @Test
     fun floorCollisionDiscardsThePotEvenWithAShield() {
         val engine = GameEngine(PlayerProfile(bank = 5_000, shieldLevel = 1), seed = 12)
         engine.startRound()
