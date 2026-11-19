@@ -73,6 +73,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.marketrocket.GameViewModel
+import com.marketrocket.game.GameEvent
 import com.marketrocket.game.GameState
 import com.marketrocket.game.Impact
 import com.marketrocket.game.Phase
@@ -228,8 +229,8 @@ private fun RunFrameClock(viewModel: GameViewModel) {
             try {
                 while (isActive && viewModel.needsFrames) {
                     val now = withFrameNanos { it }
-                    val collected = viewModel.advance((now - previous) / 1_000_000_000.0)
-                    if (collected && viewModel.settings.hapticsEnabled) {
+                    val event = viewModel.advance((now - previous) / 1_000_000_000.0)
+                    if (event == GameEvent.Ring && viewModel.settings.hapticsEnabled) {
                         haptics.performHapticFeedback(bonusHaptic)
                     }
                     previous = now

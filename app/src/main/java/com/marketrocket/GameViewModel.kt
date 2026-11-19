@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import com.marketrocket.data.GameSettings
 import com.marketrocket.data.StorageManager
 import com.marketrocket.game.GameEngine
+import com.marketrocket.game.GameEvent
 import com.marketrocket.game.GameState
 import com.marketrocket.game.Phase
 import com.marketrocket.game.Upgrade
@@ -74,12 +75,12 @@ internal class GameViewModel(application: Application) : AndroidViewModel(applic
 
     fun releaseFlight() = engine.setThrust(false)
 
-    fun advance(deltaTime: Double): Boolean {
-        if (paused || !deltaTime.isFinite() || deltaTime <= 0.0) return false
-        val collectedBonus = engine.advance(deltaTime)
+    fun advance(deltaTime: Double): GameEvent? {
+        if (paused || !deltaTime.isFinite() || deltaTime <= 0.0) return null
+        val event = engine.advance(deltaTime)
         hudElapsed += deltaTime.coerceAtMost(0.08)
-        publish(refreshPot = collectedBonus || hudElapsed >= 1.0 / 15.0)
-        return collectedBonus
+        publish(save = event == GameEvent.Crash, refreshPot = event != null || hudElapsed >= 1.0 / 15.0)
+        return event
     }
 
     fun cashOut(): Boolean {

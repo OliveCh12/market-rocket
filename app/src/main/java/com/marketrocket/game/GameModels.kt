@@ -32,6 +32,7 @@ internal data class PlayerProfile(
     val leverageLevel: Int = 0,
     val shieldLevel: Int = 0,
     val lifetimeEarnings: Long = bank,
+    val stats: CareerStats = CareerStats(),
 ) {
     val startingCapital: Long get() = 250L shl capitalLevel
     val growthRate: Double get() = 0.29 + 0.105 * leverageLevel
@@ -58,6 +59,37 @@ internal data class PlayerProfile(
             leverageLevel = leverageLevel.coerceIn(0, Upgrade.Leverage.maxLevel),
             shieldLevel = shieldLevel.coerceIn(0, Upgrade.Shield.maxLevel),
             lifetimeEarnings = lifetimeEarnings.coerceIn(available, MAX_BANK),
+            stats = stats.normalized(),
+        )
+    }
+}
+
+internal data class CareerStats(
+    val completedRounds: Long = 0L,
+    val cashOuts: Long = 0L,
+    val rings: Long = 0L,
+    val bestCombo: Int = 0,
+    val bestCashOut: Long = 0L,
+    val longestFlightMillis: Long = 0L,
+) {
+    fun record(rings: Int, combo: Int, flightMillis: Long, payment: Long? = null) = copy(
+        completedRounds = (completedRounds + 1).coerceAtMost(MAX_BANK),
+        cashOuts = (cashOuts + if (payment == null) 0 else 1).coerceAtMost(MAX_BANK),
+        rings = (this.rings + rings).coerceAtMost(MAX_BANK),
+        bestCombo = maxOf(bestCombo, combo),
+        bestCashOut = maxOf(bestCashOut, payment ?: 0L),
+        longestFlightMillis = maxOf(longestFlightMillis, flightMillis),
+    )
+
+    fun normalized(): CareerStats {
+        val complete = completedRounds.coerceIn(0, MAX_BANK)
+        return copy(
+            completedRounds = complete,
+            cashOuts = cashOuts.coerceIn(0, complete),
+            rings = rings.coerceIn(0, MAX_BANK),
+            bestCombo = bestCombo.coerceAtLeast(0),
+            bestCashOut = bestCashOut.coerceIn(0, MAX_BANK),
+            longestFlightMillis = longestFlightMillis.coerceAtLeast(0L),
         )
     }
 }
@@ -97,6 +129,10 @@ internal fun PlayerProfile.earningsBeforeTracking(): Long =
 
 internal enum class Phase { Ready, Playing, CashedOut, Crashed }
 
+internal enum class GameEvent { Ring, Shield, Crash, CashOut }
+
+internal enum class FlightLesson { Hold, Release, Collect, CashOut }
+
 internal enum class Impact { Ceiling, Floor, Volatility }
 
 internal enum class Edge { Ceiling, Floor }
@@ -104,7 +140,13 @@ internal enum class Edge { Ceiling, Floor }
 internal enum class BonusKind(val addition: Long, val multiplier: Double) {
     Cash(250L, 1.0),
     Leverage(0L, 1.5),
-    Double(0L, 2.0),
+    Double(0L, 2.0);
+
+    fun collect(pot: Double, combo: Int): Double {
+        val bonus = addition + pot * (multiplier - 1.0)
+        val streakBoost = 1.0 + (combo - 1).coerceIn(0, 5) * 0.1
+        return (pot + bonus * streakBoost).coerceAtMost(MAX_BANK.toDouble())
+    }
 }
 
 internal enum class ParticleColor { Gold, Emerald, Coral }
@@ -151,6 +193,7 @@ internal data class FloatingReward(
 internal data class RoundResult(
     val amount: Long,
     val impact: Impact? = null,
+    val newRecord: Boolean = false,
 )
 
 internal data class GameState(
@@ -169,6 +212,8 @@ internal data class GameState(
     val shakeRemaining: Float,
     val canCashOut: Boolean,
     val effectsTime: Float,
+    val combo: Int,
+    val lesson: FlightLesson,
 ) {
     val needsFrames: Boolean
         get() = phase == Phase.Playing ||

@@ -13,7 +13,7 @@ import kotlin.random.Random
  * host advances it from the display clock and sends touch and shop actions on the same thread.
  */
 internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.nextInt()) {
-    private val courseRandom = Random(seed)
+    private val roundSeeds = Random(seed xor 0x7D0D_8AF3)
     private val effectsRandom = Random(seed xor 0x5F17_8AC4)
     private val obstacles = mutableListOf<Obstacle>()
     private val bonuses = mutableListOf<Bonus>()
@@ -42,12 +42,17 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
     private var thrust = false
     private var hasShield = profile.shieldLevel > 0
     private var shakeRemaining = 0f
-    private var nextGateX = FIRST_GATE_X
-    private var gateIndex = 0
+    private var course = CourseGenerator(seed)
+    private var nextGate = course.next()
     private var collectedRings = 0
+    private var combo = 0
+    private var bestCombo = 0
+    private var lesson = FlightLesson.Hold
+    private var lessonAnchorY = START.y
 
     init {
-        resetCourse()
+        trail.addAll(STARTING_TRAIL)
+        fillCourse()
     }
 
     val needsFrames: Boolean
@@ -70,15 +75,17 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         shakeRemaining = shakeRemaining,
         canCashOut = phase == Phase.Playing && collectedRings > 0,
         effectsTime = effectsTime,
+        combo = combo,
+        lesson = lesson,
     )
 
     fun resize(width: Int, height: Int) {
         if (width > 0 && height > 0) playfield = Playfield(width.toFloat() / height)
     }
 
-    fun startRound(held: Boolean = false): Boolean {
+    fun startRound(held: Boolean = false, seed: Int? = null): Boolean {
         if (phase == Phase.Playing) return false
-        if (phase != Phase.Ready) resetCourse()
+        if (seed != null || phase != Phase.Ready) resetCourse(seed ?: roundSeeds.nextInt())
         phase = Phase.Playing
         runNumber++
         pot = profile.startingCapital.toDouble()
@@ -91,7 +98,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
 
     fun returnToReady() {
         if (phase == Phase.Ready) return
-        resetCourse()
+        resetCourse(roundSeeds.nextInt())
         phase = Phase.Ready
         pot = profile.startingCapital.toDouble()
         result = null
@@ -106,11 +113,13 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
     fun cashOut(): Boolean {
         if (phase != Phase.Playing || collectedRings == 0) return false
         val payment = min(pot.toLong(), MAX_BANK - profile.bank)
+        val newRecord = payment > profile.stats.bestCashOut
         profile = profile.copy(
             bank = profile.bank + payment,
             lifetimeEarnings = (profile.lifetimeEarnings + payment).coerceAtMost(MAX_BANK),
+            stats = profile.stats.record(collectedRings, bestCombo, flightMillis(), payment),
         )
-        result = RoundResult(payment)
+        result = RoundResult(payment, newRecord = newRecord)
         pot = 0.0
         thrust = false
         phase = Phase.CashedOut
@@ -130,23 +139,23 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         return true
     }
 
-    /** Advances by seconds and reports whether this frame collected a gold ring. */
-    fun advance(deltaTime: Double): Boolean {
-        if (!needsFrames || !deltaTime.isFinite() || deltaTime <= 0.0) return false
+    /** Advances by seconds and returns the latest feedback event in this display frame. */
+    fun advance(deltaTime: Double): GameEvent? {
+        if (!needsFrames || !deltaTime.isFinite() || deltaTime <= 0.0) return null
 
         // Only a bounded portion of a stalled frame enters the simulation.
         val seconds = deltaTime.coerceAtMost(MAX_FRAME_SECONDS)
         updateEffects(seconds.toFloat())
-        if (phase != Phase.Playing) return false
+        if (phase != Phase.Playing) return null
         accumulator += seconds
-        var collected = false
+        var feedback: GameEvent? = null
         while (phase == Phase.Playing && accumulator + STEP_EPSILON >= STEP_SECONDS) {
             accumulator = (accumulator - STEP_SECONDS).coerceAtLeast(0.0)
             previousPlayer = player
-            if (step()) collected = true
+            feedback = step() ?: feedback
         }
         if (phase != Phase.Playing) accumulator = 0.0
-        return collected
+        return feedback
     }
 
     private fun interpolatedPlayer(): WorldPoint {
@@ -157,7 +166,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         )
     }
 
-    private fun step(): Boolean {
+    private fun step(): GameEvent? {
         val seconds = STEP_SECONDS
         val targetY = if (thrust) ASCENT_SPEED else FALL_SPEED
         val decay = FLIGHT_DECAY
@@ -166,7 +175,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
             (velocityY - targetY) * (1.0 - decay) / FLIGHT_RESPONSE
         velocityY = targetY + (velocityY - targetY) * decay
 
-        val speed = min(MAX_SPEED, START_SPEED + (elapsed + seconds * 0.5) * ACCELERATION)
+        val speed = min(MAX_FLIGHT_SPEED, START_SPEED + (elapsed + seconds * 0.5) * ACCELERATION)
         elapsed += seconds
         val radiusY = PLAYER_RADIUS / playfield.yScale
         player = WorldPoint(
@@ -181,42 +190,48 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
             nextY >= 1f - radiusY -> Impact.Floor
             else -> null
         }
-        if (boundary != null) {
-            crash(boundary)
-            return false
-        }
+        if (boundary != null) return crash(boundary)
 
+        var feedback: GameEvent? = null
         val obstacleIndex = obstacles.indexOfFirst { touches(it) }
         if (obstacleIndex >= 0) {
-            if (!hasShield) {
-                crash(Impact.Volatility)
-                return false
-            }
+            if (!hasShield) return crash(Impact.Volatility)
             hasShield = false
+            combo = 0
             obstacles.removeAt(obstacleIndex)
             obstacleSnapshot = null
             burst(player, ParticleColor.Emerald, 24)
+            feedback = GameEvent.Shield
         }
 
-        val bonusIndex = bonuses.indexOfFirst { touches(it, previous) }
-        if (bonusIndex >= 0) {
-            val bonus = bonuses.removeAt(bonusIndex)
-            bonusSnapshot = null
-            collectedRings++
-            pot = ((pot + bonus.kind.addition) * bonus.kind.multiplier)
-                .coerceAtMost(MAX_BANK.toDouble())
-            burst(bonus.center, ParticleColor.Gold, 18)
-            rewards += FloatingReward(bonus.center, bonus.kind, effectsTime)
-            rewardSnapshot = null
+        val bonus = bonuses.firstOrNull()
+        if (bonus != null) {
+            val ringRadiusX = (RING_RADIUS + PLAYER_RADIUS) / playfield.xScale
+            if (touches(bonus, previous)) {
+                bonuses.removeAt(0)
+                bonusSnapshot = null
+                collectedRings++
+                combo++
+                bestCombo = maxOf(bestCombo, combo)
+                pot = bonus.kind.collect(pot, combo)
+                burst(bonus.center, ParticleColor.Gold, 18)
+                rewards += FloatingReward(bonus.center, bonus.kind, effectsTime)
+                rewardSnapshot = null
+                feedback = GameEvent.Ring
+            } else if (bonus.center.x < player.x - ringRadiusX) {
+                bonuses.removeAt(0)
+                bonusSnapshot = null
+                combo = 0
+            }
         }
 
+        updateLesson()
         if (obstacles.removeAll { it.x + it.halfWidth < player.x - 0.51f }) obstacleSnapshot = null
-        if (bonuses.removeAll { it.center.x + RING_RADIUS < player.x - 0.51f }) bonusSnapshot = null
         fillCourse()
-        return bonusIndex >= 0
+        return feedback
     }
 
-    private fun resetCourse() {
+    private fun resetCourse(seed: Int) {
         player = START
         previousPlayer = START
         velocityY = 0.0
@@ -224,9 +239,13 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         accumulator = 0.0
         effectsTime = 0f
         collectedRings = 0
+        combo = 0
+        bestCombo = 0
+        lesson = FlightLesson.Hold
+        lessonAnchorY = START.y
         shakeRemaining = 0f
-        gateIndex = 1
-        nextGateX = FIRST_GATE_X + 0.52f
+        course = CourseGenerator(seed)
+        nextGate = course.next()
         obstacles.clear()
         bonuses.clear()
         particles.clear()
@@ -238,33 +257,37 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         particleSnapshot = null
         rewardSnapshot = null
         trail.addAll(STARTING_TRAIL)
-        obstacles += Obstacle(FIRST_GATE_X, 0.105f, 0.65f, Edge.Floor)
-        bonuses += Bonus(WorldPoint(FIRST_GATE_X - 0.035f, 0.44f), BonusKind.Cash)
         fillCourse()
     }
 
     private fun fillCourse() {
-        while (nextGateX < player.x + 1.1f) {
+        while (nextGate.obstacle.x < player.x + 1.1f) {
             obstacleSnapshot = null
             bonusSnapshot = null
-            val difficulty = (nextGateX / 17f).coerceAtMost(1f)
-            val edge = if (courseRandom.nextBoolean()) Edge.Ceiling else Edge.Floor
-            val depth = 0.28f + courseRandom.nextFloat() * 0.09f + difficulty * 0.17f
-            val halfWidth = 0.074f + courseRandom.nextFloat() * 0.045f + difficulty * 0.017f
-            val tip = if (edge == Edge.Floor) 1f - depth else depth
-            val direction = if (edge == Edge.Floor) -1f else 1f
-            val safeY = (tip + direction * (0.15f + courseRandom.nextFloat() * 0.06f))
-                .coerceIn(0.27f, 0.73f)
+            obstacles += nextGate.obstacle
+            bonuses += nextGate.bonus
+            nextGate = course.next()
+        }
+    }
 
-            obstacles += Obstacle(nextGateX, halfWidth, tip, edge)
-            val reward = when {
-                gateIndex % 4 == 3 -> BonusKind.Double
-                gateIndex % 2 == 1 -> BonusKind.Leverage
-                else -> BonusKind.Cash
+    private fun updateLesson() {
+        if (collectedRings > 0) {
+            lesson = FlightLesson.CashOut
+            return
+        }
+        when (lesson) {
+            FlightLesson.Hold -> {
+                lessonAnchorY = maxOf(lessonAnchorY, player.y)
+                if (lessonAnchorY - player.y >= 0.035f) {
+                    lesson = FlightLesson.Release
+                    lessonAnchorY = player.y
+                }
             }
-            bonuses += Bonus(WorldPoint(nextGateX - 0.035f, safeY), reward)
-            gateIndex++
-            nextGateX += 0.46f + courseRandom.nextFloat() * 0.125f - difficulty * 0.055f
+            FlightLesson.Release -> {
+                lessonAnchorY = minOf(lessonAnchorY, player.y)
+                if (player.y - lessonAnchorY >= 0.035f) lesson = FlightLesson.Collect
+            }
+            FlightLesson.Collect, FlightLesson.CashOut -> Unit
         }
     }
 
@@ -316,13 +339,18 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         return dx * dx + dy * dy <= PLAYER_RADIUS * PLAYER_RADIUS
     }
 
-    private fun crash(impact: Impact) {
+    private fun flightMillis(): Long = (elapsed * 1_000).toLong()
+
+    private fun crash(impact: Impact): GameEvent {
         result = RoundResult(pot.toLong(), impact)
+        profile = profile.copy(stats = profile.stats.record(collectedRings, bestCombo, flightMillis()))
         pot = 0.0
+        combo = 0
         thrust = false
         phase = Phase.Crashed
         shakeRemaining = SHAKE_DURATION
         burst(player, ParticleColor.Coral, 32)
+        return GameEvent.Crash
     }
 
     private fun burst(origin: WorldPoint, color: ParticleColor, count: Int) {
@@ -359,9 +387,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         const val FALL_SPEED = 0.42
         const val FLIGHT_RESPONSE = 7.5
         const val START_SPEED = 0.31
-        const val MAX_SPEED = 0.59
         const val ACCELERATION = 0.009
-        const val FIRST_GATE_X = 0.52f
         const val TRAIL_SPACING = 0.006f
         val FLIGHT_DECAY = exp(-FLIGHT_RESPONSE * STEP_SECONDS)
         val START = WorldPoint(0f, 0.52f)

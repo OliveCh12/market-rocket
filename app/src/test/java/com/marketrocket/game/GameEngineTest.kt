@@ -41,7 +41,7 @@ class GameEngineTest {
         repeat(240) {
             if (collected == null) {
                 engine.setThrust(engine.snapshot().player.y > 0.44f)
-                if (engine.advance(1.0 / 120)) collected = engine.snapshot()
+                if (engine.advance(1.0 / 120) == GameEvent.Ring) collected = engine.snapshot()
             }
         }
 
