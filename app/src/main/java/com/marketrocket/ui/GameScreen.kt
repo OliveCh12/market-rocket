@@ -40,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.LongState
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.marketrocket.GameViewModel
@@ -105,6 +107,7 @@ internal fun GameScreen(viewModel: GameViewModel, onMenu: () -> Unit) {
     }
 
     BackHandler(enabled = !shopOpen, onBack = onBack)
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { viewModel.pauseForInterruption() }
     RunFrameClock(viewModel)
 
     BoxWithConstraints(Modifier.fillMaxSize().background(Obsidian)) {
@@ -156,6 +159,7 @@ internal fun GameScreen(viewModel: GameViewModel, onMenu: () -> Unit) {
         if (!paused) {
             RoundControls(
                 state = state,
+                displayedAmount = viewModel.displayedRoundAmount,
                 phase = phase,
                 compact = maxWidth < 350.dp,
                 onAction = {
@@ -329,13 +333,14 @@ private fun FlightHint(modifier: Modifier) {
 @Composable
 private fun RoundControls(
     state: State<GameState>,
+    displayedAmount: LongState,
     phase: Phase,
     compact: Boolean,
     onAction: () -> Unit,
     onShop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val amount by remember(state) { derivedStateOf { formatMoney(state.value.roundAmount) } }
+    val amount by remember(displayedAmount) { derivedStateOf { formatMoney(displayedAmount.longValue) } }
     val canCashOut by remember(state) { derivedStateOf { state.value.canCashOut } }
     val inFlight = phase == Phase.Playing
     val locked = inFlight && !canCashOut

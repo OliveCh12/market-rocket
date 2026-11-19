@@ -2,7 +2,9 @@ package com.marketrocket
 
 import android.app.Application
 import androidx.compose.runtime.State
+import androidx.compose.runtime.LongState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -18,6 +20,9 @@ internal class GameViewModel(application: Application) : AndroidViewModel(applic
     private val engine = GameEngine(storage.load())
     private val currentState = mutableStateOf(engine.snapshot())
     val state: State<GameState> = currentState
+    private val displayedPot = mutableLongStateOf(currentState.value.roundAmount)
+    val displayedRoundAmount: LongState = displayedPot
+    private var hudElapsed = 0.0
     var settings by mutableStateOf(storage.loadSettings())
         private set
     var paused by mutableStateOf(false)
@@ -33,6 +38,10 @@ internal class GameViewModel(application: Application) : AndroidViewModel(applic
         if (currentState.value.phase != Phase.Playing) return
         releaseFlight()
         paused = !paused
+    }
+
+    fun pauseForInterruption() {
+        if (currentState.value.phase == Phase.Playing && !paused) togglePause()
     }
 
     fun leaveGame() {
@@ -66,9 +75,10 @@ internal class GameViewModel(application: Application) : AndroidViewModel(applic
     fun releaseFlight() = engine.setThrust(false)
 
     fun advance(deltaTime: Double): Boolean {
-        if (paused) return false
+        if (paused || !deltaTime.isFinite() || deltaTime <= 0.0) return false
         val collectedBonus = engine.advance(deltaTime)
-        publish()
+        hudElapsed += deltaTime.coerceAtMost(0.08)
+        publish(refreshPot = collectedBonus || hudElapsed >= 1.0 / 15.0)
         return collectedBonus
     }
 
@@ -82,9 +92,13 @@ internal class GameViewModel(application: Application) : AndroidViewModel(applic
         if (engine.buy(upgrade)) publish(save = true)
     }
 
-    private fun publish(save: Boolean = false) {
-        val snapshot = engine.snapshot()
+    private fun publish(save: Boolean = false, refreshPot: Boolean = true) {
+        val snapshot = engine.snapshot(interpolate = true)
         if (save) storage.save(snapshot.profile)
+        if (refreshPot || snapshot.phase != currentState.value.phase) {
+            displayedPot.longValue = snapshot.roundAmount
+            hudElapsed = 0.0
+        }
         currentState.value = snapshot
     }
 }

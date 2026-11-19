@@ -76,8 +76,8 @@ internal fun MarketRocketCanvas(state: State<GameState>, reduceEffects: Boolean,
                 val glint = if (reduceEffects) 215f else 215f + frame.player.x * 250f
                 frame.bonuses.forEach { drawRing(it, camera, glint, textMeasurer) }
                 drawHead(frame, camera)
-                if (!reduceEffects) frame.particles.forEach { drawParticle(it, camera) }
-                frame.rewards.forEach { drawReward(it, camera, reduceEffects, textMeasurer) }
+                if (!reduceEffects) frame.particles.forEach { drawParticle(it, frame.effectsTime, camera) }
+                frame.rewards.forEach { drawReward(it, frame.effectsTime, camera, reduceEffects, textMeasurer) }
             }
             drawBounds(frame)
         }
@@ -138,6 +138,7 @@ private fun DrawScope.drawCurve(
     curve.rewind()
     curve.moveTo(start.x, start.y)
     for (sample in frame.trail) {
+        if (sample.x > frame.player.x) break
         val current = point(sample, camera)
         curve.lineTo(current.x, current.y)
     }
@@ -244,26 +245,29 @@ private fun DrawScope.drawHead(frame: GameState, camera: Float) {
     drawCircle(color, radius, center, style = Stroke(0.8.dp.toPx()))
 }
 
-private fun DrawScope.drawParticle(particle: Particle, camera: Float) {
+private fun DrawScope.drawParticle(particle: Particle, time: Float, camera: Float) {
     val color = when (particle.color) {
         ParticleColor.Gold -> Gold
         ParticleColor.Emerald -> Mint
         ParticleColor.Coral -> CoralText
     }
-    val remaining = 1f - particle.age / particle.lifetime
+    val age = time - particle.bornAt
+    val remaining = (1f - age / particle.lifetime).coerceIn(0f, 1f)
     val radius = particle.radius * size.minDimension * (0.45f + remaining * 0.55f)
-    val head = point(particle.position, camera)
-    val tail = head - Offset(particle.velocity.x * size.width, particle.velocity.y * size.height) * 0.027f
+    val velocity = Offset(particle.velocity.x * size.width, particle.velocity.y * size.height)
+    val head = point(particle.origin, camera) + velocity * age
+    val tail = head - velocity * 0.027f
     drawLine(color.copy(alpha = remaining), tail, head, radius * 1.4f, StrokeCap.Round)
 }
 
 private fun DrawScope.drawReward(
     reward: FloatingReward,
+    time: Float,
     camera: Float,
     reduceEffects: Boolean,
     measurer: TextMeasurer,
 ) {
-    val progress = reward.age / REWARD_DURATION
+    val progress = ((time - reward.bornAt) / REWARD_DURATION).coerceIn(0f, 1f)
     val center = point(reward.position, camera)
     val layout = measurer.measure(
         reward.kind.label(),

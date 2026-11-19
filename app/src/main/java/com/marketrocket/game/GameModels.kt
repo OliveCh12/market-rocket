@@ -134,18 +134,18 @@ internal data class Bonus(
 )
 
 internal data class Particle(
-    val position: WorldPoint,
+    val origin: WorldPoint,
     val velocity: WorldPoint,
     val color: ParticleColor,
     val radius: Float,
     val lifetime: Float,
-    val age: Float = 0f,
+    val bornAt: Float,
 )
 
 internal data class FloatingReward(
     val position: WorldPoint,
     val kind: BonusKind,
-    val age: Float = 0f,
+    val bornAt: Float,
 )
 
 internal data class RoundResult(
@@ -168,6 +168,7 @@ internal data class GameState(
     val hasShield: Boolean,
     val shakeRemaining: Float,
     val canCashOut: Boolean,
+    val effectsTime: Float,
 ) {
     val needsFrames: Boolean
         get() = phase == Phase.Playing ||
