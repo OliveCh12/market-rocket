@@ -31,6 +31,7 @@ internal data class PlayerProfile(
     val capitalLevel: Int = 0,
     val leverageLevel: Int = 0,
     val shieldLevel: Int = 0,
+    val lifetimeEarnings: Long = bank,
 ) {
     val startingCapital: Long get() = 250L shl capitalLevel
     val growthRate: Double get() = 0.29 + 0.105 * leverageLevel
@@ -38,23 +39,27 @@ internal data class PlayerProfile(
 
     val tierProgress: TierProgress
         get() {
-            val index = wealthTiers.indexOfLast { bank >= it.threshold }.coerceAtLeast(0)
+            val index = wealthTiers.indexOfLast { lifetimeEarnings >= it.threshold }.coerceAtLeast(0)
             val current = wealthTiers[index]
             val next = wealthTiers.getOrNull(index + 1)
             val fraction = if (next == null) {
                 1f
             } else {
-                (bank - current.threshold).toFloat() / (next.threshold - current.threshold)
+                (lifetimeEarnings - current.threshold).toFloat() / (next.threshold - current.threshold)
             }
             return TierProgress(current, next, fraction.coerceIn(0f, 1f))
         }
 
-    fun normalized() = copy(
-        bank = bank.coerceIn(0L, MAX_BANK),
-        capitalLevel = capitalLevel.coerceIn(0, Upgrade.Capital.maxLevel),
-        leverageLevel = leverageLevel.coerceIn(0, Upgrade.Leverage.maxLevel),
-        shieldLevel = shieldLevel.coerceIn(0, Upgrade.Shield.maxLevel),
-    )
+    fun normalized(): PlayerProfile {
+        val available = bank.coerceIn(0L, MAX_BANK)
+        return copy(
+            bank = available,
+            capitalLevel = capitalLevel.coerceIn(0, Upgrade.Capital.maxLevel),
+            leverageLevel = leverageLevel.coerceIn(0, Upgrade.Leverage.maxLevel),
+            shieldLevel = shieldLevel.coerceIn(0, Upgrade.Shield.maxLevel),
+            lifetimeEarnings = lifetimeEarnings.coerceIn(available, MAX_BANK),
+        )
+    }
 }
 
 internal enum class Upgrade(val title: String, private val prices: List<Long>) {
@@ -78,12 +83,17 @@ internal enum class Upgrade(val title: String, private val prices: List<Long>) {
 
     fun price(profile: PlayerProfile): Long? = prices.getOrNull(level(profile))
 
+    fun totalSpent(profile: PlayerProfile): Long = prices.take(level(profile)).sum()
+
     fun nextLevel(profile: PlayerProfile): PlayerProfile = when (this) {
         Capital -> profile.copy(capitalLevel = profile.capitalLevel + 1)
         Leverage -> profile.copy(leverageLevel = profile.leverageLevel + 1)
         Shield -> profile.copy(shieldLevel = 1)
     }
 }
+
+internal fun PlayerProfile.earningsBeforeTracking(): Long =
+    (bank + Upgrade.entries.sumOf { it.totalSpent(this) }).coerceAtMost(MAX_BANK)
 
 internal enum class Phase { Ready, Playing, CashedOut, Crashed }
 
@@ -157,6 +167,7 @@ internal data class GameState(
     val result: RoundResult?,
     val hasShield: Boolean,
     val shakeRemaining: Float,
+    val canCashOut: Boolean,
 ) {
     val needsFrames: Boolean
         get() = phase == Phase.Playing ||

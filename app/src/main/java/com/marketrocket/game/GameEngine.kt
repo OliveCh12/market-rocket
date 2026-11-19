@@ -36,6 +36,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
     private var shakeRemaining = 0f
     private var nextGateX = FIRST_GATE_X
     private var gateIndex = 0
+    private var collectedRings = 0
 
     init {
         resetCourse()
@@ -59,6 +60,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         result = result,
         hasShield = hasShield,
         shakeRemaining = shakeRemaining,
+        canCashOut = phase == Phase.Playing && collectedRings > 0,
     )
 
     fun resize(width: Int, height: Int) {
@@ -92,9 +94,12 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
     }
 
     fun cashOut(): Boolean {
-        if (phase != Phase.Playing) return false
+        if (phase != Phase.Playing || collectedRings == 0) return false
         val payment = min(pot.toLong(), MAX_BANK - profile.bank)
-        profile = profile.copy(bank = profile.bank + payment)
+        profile = profile.copy(
+            bank = profile.bank + payment,
+            lifetimeEarnings = (profile.lifetimeEarnings + payment).coerceAtMost(MAX_BANK),
+        )
         result = RoundResult(payment)
         pot = 0.0
         thrust = false
@@ -174,6 +179,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         val bonusIndex = bonuses.indexOfFirst { touches(it) }
         if (bonusIndex >= 0) {
             val bonus = bonuses.removeAt(bonusIndex)
+            collectedRings++
             pot = ((pot + bonus.kind.addition) * bonus.kind.multiplier)
                 .coerceAtMost(MAX_BANK.toDouble())
             burst(bonus.center, ParticleColor.Gold, 18)
@@ -190,6 +196,7 @@ internal class GameEngine(initialProfile: PlayerProfile, seed: Int = Random.next
         player = START
         velocityY = 0.0
         elapsed = 0.0
+        collectedRings = 0
         shakeRemaining = 0f
         gateIndex = 1
         nextGateX = FIRST_GATE_X + 0.52f

@@ -14,7 +14,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 
 internal enum class Symbol {
-    Trend, Play, Deposit, Reload, Up, Down, Sliders, Chevron, Shield, Close, Bolt, Back, Pause,
+    Trend, Play, Deposit, Reload, Up, Down, Sliders, Chevron, Shield, Close, Bolt, Back, Pause, Lock,
 }
 
 @Composable
@@ -89,6 +89,11 @@ internal fun MarketIcon(
             Symbol.Pause -> {
                 trace(9f, 5f, 9f, 19f)
                 trace(15f, 5f, 15f, 19f)
+            }
+            Symbol.Lock -> {
+                trace(6f, 10f, 18f, 10f, 18f, 20f, 6f, 20f, 6f, 10f)
+                drawArc(color, 180f, 180f, useCenter = false, dot(8f, 4f), Size(8f * unit, 9f * unit), style = stroke)
+                drawCircle(color, unit, dot(12f, 15f))
             }
             Symbol.Shield -> {
                 trace(12f, 3f, 20f, 6f, 19f, 14f, 16f, 18f, 12f, 21f, 8f, 18f, 5f, 14f, 4f, 6f, 12f, 3f)

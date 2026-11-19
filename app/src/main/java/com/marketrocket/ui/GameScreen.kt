@@ -336,15 +336,17 @@ private fun RoundControls(
     modifier: Modifier = Modifier,
 ) {
     val amount by remember(state) { derivedStateOf { formatMoney(state.value.roundAmount) } }
+    val canCashOut by remember(state) { derivedStateOf { state.value.canCashOut } }
     val inFlight = phase == Phase.Playing
+    val locked = inFlight && !canCashOut
     val label = when (phase) {
         Phase.Ready -> "Lancer"
-        Phase.Playing -> "Encaisser"
+        Phase.Playing -> if (locked) "Un anneau requis" else "Encaisser"
         Phase.CashedOut, Phase.Crashed -> "Relancer"
     }
     val symbol = when (phase) {
         Phase.Ready -> Symbol.Play
-        Phase.Playing -> Symbol.Deposit
+        Phase.Playing -> if (locked) Symbol.Lock else Symbol.Deposit
         Phase.CashedOut, Phase.Crashed -> Symbol.Reload
     }
 
@@ -352,12 +354,18 @@ private fun RoundControls(
         key(phase) {
             Button(
                 onClick = onAction,
+                enabled = !locked,
                 shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Emerald, contentColor = ButtonInk),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Emerald,
+                    contentColor = ButtonInk,
+                    disabledContainerColor = Panel,
+                    disabledContentColor = MutedInk,
+                ),
                 contentPadding = PaddingValues(horizontal = 15.dp),
                 modifier = Modifier.weight(1f).height(54.dp),
             ) {
-                MarketIcon(symbol, ButtonInk, Modifier.size(17.dp))
+                MarketIcon(symbol, if (locked) MutedInk else ButtonInk, Modifier.size(17.dp))
                 Text(
                     label,
                     fontWeight = FontWeight.Bold,
@@ -367,8 +375,8 @@ private fun RoundControls(
                 )
                 if (inFlight || phase == Phase.Ready) {
                     Text(
-                        if (inFlight) "+$amount" else amount,
-                        color = ButtonInk,
+                        if (canCashOut) "+$amount" else amount,
+                        color = if (locked) MutedInk else ButtonInk,
                         style = MarketMoney.copy(fontSize = 16.sp, lineHeight = 21.sp, letterSpacing = (-0.5).sp),
                         maxLines = 1,
                     )

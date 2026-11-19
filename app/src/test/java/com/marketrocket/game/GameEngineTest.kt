@@ -57,8 +57,16 @@ class GameEngineTest {
     @Test
     fun cashOutCreditsTheBankExactlyOnce() {
         val engine = GameEngine(PlayerProfile(bank = 200), seed = 12)
+        engine.resize(380, 430)
         engine.startRound()
-        repeat(30) { engine.advance(1.0 / 60) }
+        repeat(240) {
+            val frame = engine.snapshot()
+            if (!frame.canCashOut) {
+                engine.setThrust(frame.player.y > 0.44f)
+                engine.advance(1.0 / 120)
+            }
+        }
+        assertTrue(engine.snapshot().canCashOut)
         val pot = engine.snapshot().roundAmount
 
         assertFalse(engine.buy(Upgrade.Capital))
@@ -66,11 +74,13 @@ class GameEngineTest {
         assertFalse(engine.cashOut())
         assertEquals(Phase.CashedOut, engine.snapshot().phase)
         assertEquals(200 + pot, engine.snapshot().profile.bank)
+        assertEquals(200 + pot, engine.snapshot().profile.lifetimeEarnings)
         assertEquals(pot, engine.snapshot().result?.amount)
 
         assertTrue(engine.startRound())
         assertEquals(250L, engine.snapshot().roundAmount)
         assertEquals(200 + pot, engine.snapshot().profile.bank)
+        assertFalse(engine.cashOut())
     }
 
     @Test
@@ -133,7 +143,8 @@ class GameEngineTest {
                 assertEquals(Phase.Playing, frame.phase)
                 assertFalse(frame.hasShield)
                 assertFalse(firstSpike in frame.obstacles)
-                assertTrue(engine.cashOut())
+                assertFalse(engine.cashOut())
+                engine.returnToReady()
                 assertTrue(engine.startRound())
                 assertTrue(engine.snapshot().hasShield)
             }
